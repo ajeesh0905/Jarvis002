@@ -436,4 +436,4 @@ const server = http.createServer(async (req, res) => {
     send(res, e.status || 500, { error: e.status ? e.message : 'Server error' });
   }
 });
-server.listen(PORT, () => console.log(`Ruchi Food Products running on http://localhost:${PORT}  (admin: /admin)`));
+server.listen(PORT, process.env.HOST || '0.0.0.0', () => console.log(`Ruchi Food Products running on http://localhost:${PORT}  (admin: /admin)`));

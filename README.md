@@ -12,6 +12,9 @@ Requires Node >= 22.13 (no npm install needed).
 
 Data is stored in `data/orders.db` (SQLite). Back this folder up; set `DATA_DIR` to relocate it.
 
+## Deploy
+See `deploy/DEPLOY.md` (Oracle Cloud Always Free, with HTTPS and daily backups).
+
 ## Features
 - Shop login with phone + PIN; quantities with +/− buttons; prices shown; total
 - Order cut-off time (set in Admin → Settings, India time); shops order for next day

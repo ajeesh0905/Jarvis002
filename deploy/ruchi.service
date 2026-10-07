@@ -1,0 +1,17 @@
+[Unit]
+Description=Ruchi Food Products order app
+After=network.target
+
+[Service]
+User=ruchi
+WorkingDirectory=/opt/ruchi
+EnvironmentFile=/etc/ruchi.env
+ExecStart=/usr/bin/node /opt/ruchi/server.js
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/ruchi
+
+[Install]
+WantedBy=multi-user.target
