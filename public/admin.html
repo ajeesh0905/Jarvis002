@@ -83,10 +83,12 @@ function filtP(){const v=$('#psrch').value.trim().toLowerCase();document.querySe
 async function moveP(id,dir){try{await api('products/move',{id,dir});go('products')}catch(e){msg=e.message;render()}}
 async function addProduct(){try{await api('products',{name_en:$('#pe').value,name_ml:$('#pm').value,category:$('#pc').value,price:$('#pp').value});D.showAdd=false;go('products')}catch(e){msg=e.message;render()}}
 async function saveProduct(id){try{await api('products',{id,name_en:$('#e'+id).value,name_ml:$('#m'+id).value,category:$('#c'+id).value,price:$('#r'+id).value,active:$('#a'+id).checked?1:0});go('products')}catch(e){msg=e.message;render()}}
-function shops(){return `<h2>Add shop</h2><div class="card grid"><input id="sn" placeholder="Shop name"><input id="sp" inputmode="numeric" maxlength="10" placeholder="Phone (10 digits)"><input id="sx" inputmode="numeric" maxlength="6" placeholder="PIN (4-6 digits)"><button onclick="addShop()">Add</button></div>
- <h2>Shops</h2>${D.shops.map(s=>`<div class="card grid"><input value="${esc(s.name)}" id="n${s.id}"><input value="${esc(s.phone)}" id="h${s.id}" maxlength="10">
+function shops(){return `<div class="row" style="margin:18px 0 8px"><h2 style="margin:0">Shops (${D.shops.length})</h2><button class="small" onclick="toggleAddShop()">${D.showAddShop?'Cancel':'+ Add shop'}</button></div>
+ ${D.showAddShop?`<div class="card grid"><input id="sn" placeholder="Shop name"><input id="sp" inputmode="numeric" maxlength="10" placeholder="Phone (10 digits)"><input id="sx" inputmode="numeric" maxlength="6" placeholder="PIN (4-6 digits)"><button onclick="addShop()">Save new shop</button></div>`:''}
+ ${D.shops.map(s=>`<div class="card grid"><input value="${esc(s.name)}" id="n${s.id}"><input value="${esc(s.phone)}" id="h${s.id}" maxlength="10">
  <input id="x${s.id}" inputmode="numeric" maxlength="6" placeholder="New PIN (leave blank to keep)"><div class="row"><label><input type="checkbox" id="c${s.id}" ${s.active?'checked':''} style="width:auto"> Active</label><button class="small" onclick="saveShop(${s.id})">Save</button></div></div>`).join('')}`}
-async function addShop(){try{await api('shops',{name:$('#sn').value,phone:$('#sp').value,pin:$('#sx').value});go('shops')}catch(e){msg=e.message;render()}}
+function toggleAddShop(){D.showAddShop=!D.showAddShop;render()}
+async function addShop(){try{await api('shops',{name:$('#sn').value,phone:$('#sp').value,pin:$('#sx').value});D.showAddShop=false;go('shops')}catch(e){msg=e.message;render()}}
 async function saveShop(id){try{await api('shops',{id,name:$('#n'+id).value,phone:$('#h'+id).value,pin:$('#x'+id).value,active:$('#c'+id).checked?1:0});go('shops')}catch(e){msg=e.message;render()}}
 function settings(){const S=D.settings,days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
  return `<h2>Order cut-off time</h2><div class="card grid"><p class="mute">Shops order for the next working day. They can place or change orders until this time on the day before (24h, India time).</p><input type="time" id="co" value="${S.cutoff}"><button onclick="saveCutoff()">Save time</button></div>
