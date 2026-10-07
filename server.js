@@ -204,7 +204,7 @@ route('POST', '/api/admin/products', async (req) => {
   auth(req, 'admin');
   const b = await readJson(req);
   const name = String(b.name_en || '').trim(); if (!name) throw bad('English name required');
-  const price = num(b.price, 'price');
+  const price = b.price === '' || b.price == null ? 0 : num(b.price, 'price'); // 0 = market price
   if (b.id) {
     db.prepare('UPDATE products SET name_en=?,name_ml=?,price=?,active=?,sort=? WHERE id=?')
       .run(name, String(b.name_ml || '').trim(), price, b.active === 0 || b.active === false ? 0 : 1, Math.floor(num(b.sort || 0, 'sort', -1e6)), num(b.id, 'id'));
@@ -237,7 +237,7 @@ route('POST', '/api/admin/shops', async (req) => {
 route('GET', '/api/admin/daily', (req, url) => {
   auth(req, 'admin');
   const date = validDate(url.searchParams.get('date') || tomorrowIST());
-  const rows = db.prepare(`SELECT o.shop_id, s.name shop, o.product_id, p.name_en, p.name_ml, o.qty, o.price
+  const rows = db.prepare(`SELECT o.shop_id, s.name shop, o.product_id, p.name_en, p.name_ml, o.qty, CASE WHEN o.price>0 THEN o.price ELSE p.price END AS price
     FROM orders o JOIN shops s ON s.id=o.shop_id JOIN products p ON p.id=o.product_id WHERE o.date=? ORDER BY s.name, p.sort, p.id`).all(date);
   const products = {}, shops = {};
   let total = 0;
@@ -264,7 +264,7 @@ route('POST', '/api/admin/order', async (req) => {
 // Monthly analysis
 function monthData(month) {
   const from = month + '-01', to = month + '-31';
-  const rows = db.prepare(`SELECT o.date, o.shop_id, s.name shop, o.product_id, p.name_en, p.name_ml, o.qty, o.price
+  const rows = db.prepare(`SELECT o.date, o.shop_id, s.name shop, o.product_id, p.name_en, p.name_ml, o.qty, CASE WHEN o.price>0 THEN o.price ELSE p.price END AS price
     FROM orders o JOIN shops s ON s.id=o.shop_id JOIN products p ON p.id=o.product_id WHERE o.date BETWEEN ? AND ? ORDER BY o.date`).all(from, to);
   return rows;
 }
