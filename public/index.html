@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ml"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ruchi Food Products</title><link rel="manifest" href="manifest.json"><link rel="icon" href="icon.svg">
+<meta name="theme-color" content="#c2570c"><link rel="stylesheet" href="app.css">
+</head><body><main id="app"></main>
+<script>
+const T={ml:{title:'ദിവസ ഓർഡർ',phone:'ഫോൺ നമ്പർ',pin:'PIN',login:'ലോഗിൻ',logout:'ലോഗൗട്ട്',for:'ഡെലിവറി തീയതി',cutoff:'ഓർഡർ സമയം അവസാനിക്കുന്നത്',locked:'ഓർഡർ സമയം കഴിഞ്ഞു. ഇനി മാറ്റാൻ കഴിയില്ല.',save:'ഓർഡർ സേവ് ചെയ്യുക',saved:'ഓർഡർ സേവ് ചെയ്തു ✔',total:'ആകെ',none:'ഉൽപ്പന്നങ്ങൾ ഒന്നുമില്ല',lang:'English'},
+en:{title:'Daily Order',phone:'Phone number',pin:'PIN',login:'Login',logout:'Logout',for:'Delivery date',cutoff:'Order closes at',locked:'Order time is over. Changes are not allowed.',save:'Save order',saved:'Order saved ✔',total:'Total',none:'No products',lang:'മലയാളം'}};
+let lang=localStorage.lang||'ml',token=localStorage.token||'',state=null,msg='';
+const t=k=>T[lang][k],$=s=>document.querySelector(s);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+async function api(p,body){const r=await fetch('/api/'+p,{method:body?'POST':'GET',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:body?JSON.stringify(body):undefined});
+ const j=await r.json();if(!r.ok){if(r.status===401&&token&&p.startsWith('shop/order')){logout();}throw new Error(j.error||'Error')}return j}
+function logout(){token='';localStorage.removeItem('token');state=null;render()}
+function setLang(){lang=lang==='ml'?'en':'ml';localStorage.lang=lang;render()}
+const head=()=>`<header><h1>🫓 Ruchi Food Products</h1><div><button class="ghost small" onclick="setLang()">${t('lang')}</button> ${token?`<button class="ghost small" onclick="logout()">${t('logout')}</button>`:''}</div></header>`;
+async function doLogin(){msg='';try{const r=await api('shop/login',{phone:$('#ph').value,pin:$('#pn').value});token=r.token;localStorage.token=token;await load()}catch(e){msg=e.message;render()}}
+async function load(){try{state=await api('shop/order');msg=''}catch(e){msg=e.message}render()}
+function step(id,d){const i=$('#q'+id);i.value=Math.max(0,(+i.value||0)+d);calc()}
+function calc(){let s=0;state.products.forEach(p=>{s+=(+$('#q'+p.id).value||0)*p.price});$('#tot').textContent='₹'+s.toFixed(2)}
+async function save(){const items=state.products.map(p=>({product_id:p.id,qty:+$('#q'+p.id).value||0}));
+ try{await api('shop/order',{items});msg='ok'}catch(e){msg=e.message}await load()}
+function render(){const a=$('#app');
+ if(!token){a.innerHTML=head()+`<div class="card grid"><label>${t('phone')}<input id="ph" inputmode="numeric" maxlength="10"></label><label>${t('pin')}<input id="pn" type="password" inputmode="numeric" maxlength="6"></label><button onclick="doLogin()">${t('login')}</button></div>${msg?`<div class="msg err">${esc(msg)}</div>`:''}`;return}
+ if(!state){a.innerHTML=head()+'<p class="mute">…</p>';load();return}
+ const L=state.locked,name=lang==='ml'?(p=>p.name_ml||p.name_en):(p=>p.name_en);
+ a.innerHTML=head()+`<div class="card"><b>${esc(state.shop.name)}</b><div class="mute">${t('for')}: ${state.date} · ${t('cutoff')}: ${state.cutoff}</div></div>
+ ${L?`<div class="banner">${t('locked')}</div>`:''}
+ ${msg==='ok'?`<div class="msg ok">${t('saved')}</div>`:msg?`<div class="msg err">${esc(msg)}</div>`:''}
+ ${state.products.length?state.products.map(p=>`<div class="card row"><div><b>${esc(name(p))}</b><div class="mute">₹${p.price}</div></div>
+  <div class="qty"><button ${L?'disabled':''} onclick="step(${p.id},-1)">−</button><input id="q${p.id}" type="number" inputmode="numeric" min="0" value="${p.qty}" ${L?'disabled':''} oninput="calc()"><button ${L?'disabled':''} onclick="step(${p.id},1)">+</button></div></div>`).join(''):`<p class="mute">${t('none')}</p>`}
+ <div class="total row"><b>${t('total')}: <span id="tot"></span></b><button ${L?'disabled':''} onclick="save()">${t('save')}</button></div>`;
+ if(state.products.length)calc()}
+render();
+</script></body></html>

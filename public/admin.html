@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ruchi Food Products - Admin</title><link rel="icon" href="icon.svg"><link rel="stylesheet" href="app.css">
+</head><body><main id="app"></main>
+<script>
+let token=localStorage.atoken||'',tab='daily',msg='',D={};
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const inr=n=>'₹'+(+n).toLocaleString('en-IN',{maximumFractionDigits:2});
+async function api(p,body){const r=await fetch('/api/admin/'+p,{method:body?'POST':'GET',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:body?JSON.stringify(body):undefined});
+ const j=await r.json();if(!r.ok){if(r.status===401&&token){logout()}throw new Error(j.error||'Error')}return j}
+function logout(){token='';localStorage.removeItem('atoken');render()}
+async function login(){try{const r=await api('login',{password:$('#pw').value});token=r.token;localStorage.atoken=token;msg='';go('daily')}catch(e){msg=e.message;render()}}
+async function go(t){tab=t;msg='';try{
+ if(t==='daily'){D.daily=await api('daily?date='+(D.date||''))}
+ if(t==='monthly'){D.monthly=await api('monthly?month='+(D.month||''))}
+ if(t==='products')D.products=await api('products');
+ if(t==='shops')D.shops=await api('shops');
+ if(t==='settings')D.settings=await api('settings');
+ }catch(e){msg=e.message}render()}
+const names=p=>esc(p.name_en)+(p.name_ml?` <span class="mute">${esc(p.name_ml)}</span>`:'');
+function tabs(){return `<div class="tabs">${[['daily','Daily'],['monthly','Monthly'],['products','Products'],['shops','Shops'],['settings','Settings']].map(([k,l])=>`<button class="${tab===k?'on':''}" onclick="go('${k}')">${l}</button>`).join('')}</div>`}
+function daily(){const d=D.daily;if(!d)return'';
+ return `<div class="card row"><label>Date <input type="date" value="${d.date}" onchange="D.date=this.value;go('daily')"></label><div class="kpi" style="margin:0"><div><span class="mute">Total</span><b>${inr(d.total)}</b></div></div></div>
+ <h2>Total to prepare</h2><div class="card"><table><tr><th>Product</th><th class="n">Qty</th><th class="n">Amount</th></tr>
+ ${d.products.map(p=>`<tr><td>${names(p)}</td><td class="n"><b>${p.qty}</b></td><td class="n">${inr(p.amount)}</td></tr>`).join('')||'<tr><td colspan=3 class="mute">No orders yet</td></tr>'}</table></div>
+ <h2>By shop</h2>${d.shops.map(s=>`<div class="card"><div class="row"><b>${esc(s.name)}</b><span>${inr(s.amount)}</span></div>
+ <div class="mute">${s.items.map(i=>`${esc(i.name_en)} × ${i.qty}`).join(' · ')}</div>
+ <button class="ghost small" onclick="editOrder(${s.id})">Edit order</button></div>`).join('')}
+ ${d.notOrdered.length?`<h2>Not ordered yet (${d.notOrdered.length})</h2><div class="card mute">${d.notOrdered.map(s=>`${esc(s.name)} (<a href="tel:${esc(s.phone)}">${esc(s.phone)}</a>)`).join(', ')}</div>`:''}`}
+async function editOrder(shopId){const d=D.daily,prods=await api('products'),s=d.shops.find(x=>x.id===shopId);
+ const cur=Object.fromEntries(s.items.map(i=>[i.product_id,i.qty]));
+ const items=[];for(const p of prods.filter(p=>p.active)){const v=prompt(`${s.name} - ${p.name_en} qty`,cur[p.id]||0);if(v===null)return;items.push({product_id:p.id,qty:+v||0})}
+ try{await api('order',{shop_id:shopId,date:d.date,items});go('daily')}catch(e){msg=e.message;render()}}
+function monthly(){const m=D.monthly;if(!m)return'';const mx=Math.max(1,...m.shops.map(s=>s.amount));
+ return `<div class="card row"><label>Month <input type="month" value="${m.month}" onchange="D.month=this.value;go('monthly')"></label><button class="ghost small" onclick="exportCsv()">Download CSV</button></div>
+ <div class="kpi"><div><span class="mute">Revenue</span><b>${inr(m.total)}</b></div><div><span class="mute">Total qty</span><b>${m.totalQty}</b></div><div><span class="mute">Order days</span><b>${m.orderDays}</b></div><div><span class="mute">Avg / day</span><b>${inr(m.avgPerDay)}</b></div></div>
+ <h2>Shops (top first)</h2><div class="card">${m.shops.map(s=>`<div style="margin-bottom:10px"><div class="row"><span>${esc(s.name)}</span><b>${inr(s.amount)}</b></div><div class="bar" style="width:${s.amount/mx*100}%"></div><div class="mute">${s.qty} items · ${s.days} days</div></div>`).join('')||'<span class="mute">No data</span>'}</div>
+ <h2>Products</h2><div class="card"><table><tr><th>Product</th><th class="n">Qty</th><th class="n">Amount</th></tr>${m.products.map(p=>`<tr><td>${names(p)}</td><td class="n">${p.qty}</td><td class="n">${inr(p.amount)}</td></tr>`).join('')}</table></div>
+ <h2>Day by day</h2><div class="card"><table><tr><th>Date</th><th class="n">Qty</th><th class="n">Amount</th></tr>${m.days.map(d=>`<tr><td>${d.date}</td><td class="n">${d.qty}</td><td class="n">${inr(d.amount)}</td></tr>`).join('')}</table></div>`}
+async function exportCsv(){try{const r=await api('export?month='+(D.monthly.month));const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['﻿'+r.csv],{type:'text/csv'}));a.download=r.filename;a.click()}catch(e){msg=e.message;render()}}
+function products(){return `<h2>Add product</h2><div class="card grid">
+ <input id="pe" placeholder="Name (English)"><input id="pm" placeholder="പേര് (മലയാളം)"><input id="pp" type="number" step="0.01" placeholder="Price ₹"><button onclick="addProduct()">Add</button></div>
+ <h2>Products</h2>${D.products.map(p=>`<div class="card grid"><div class="grid grid2"><input value="${esc(p.name_en)}" id="e${p.id}"><input value="${esc(p.name_ml)}" id="m${p.id}"></div>
+ <div class="row"><input type="number" step="0.01" value="${p.price}" id="r${p.id}" style="width:110px"><label><input type="checkbox" id="a${p.id}" ${p.active?'checked':''} style="width:auto"> Active</label><button class="small" onclick="saveProduct(${p.id})">Save</button></div></div>`).join('')}`}
+async function addProduct(){try{await api('products',{name_en:$('#pe').value,name_ml:$('#pm').value,price:$('#pp').value||0});go('products')}catch(e){msg=e.message;render()}}
+async function saveProduct(id){try{await api('products',{id,name_en:$('#e'+id).value,name_ml:$('#m'+id).value,price:$('#r'+id).value,active:$('#a'+id).checked?1:0});go('products')}catch(e){msg=e.message;render()}}
+function shops(){return `<h2>Add shop</h2><div class="card grid"><input id="sn" placeholder="Shop name"><input id="sp" inputmode="numeric" maxlength="10" placeholder="Phone (10 digits)"><input id="sx" inputmode="numeric" maxlength="6" placeholder="PIN (4-6 digits)"><button onclick="addShop()">Add</button></div>
+ <h2>Shops</h2>${D.shops.map(s=>`<div class="card grid"><input value="${esc(s.name)}" id="n${s.id}"><input value="${esc(s.phone)}" id="h${s.id}" maxlength="10">
+ <input id="x${s.id}" inputmode="numeric" maxlength="6" placeholder="New PIN (leave blank to keep)"><div class="row"><label><input type="checkbox" id="c${s.id}" ${s.active?'checked':''} style="width:auto"> Active</label><button class="small" onclick="saveShop(${s.id})">Save</button></div></div>`).join('')}`}
+async function addShop(){try{await api('shops',{name:$('#sn').value,phone:$('#sp').value,pin:$('#sx').value});go('shops')}catch(e){msg=e.message;render()}}
+async function saveShop(id){try{await api('shops',{id,name:$('#n'+id).value,phone:$('#h'+id).value,pin:$('#x'+id).value,active:$('#c'+id).checked?1:0});go('shops')}catch(e){msg=e.message;render()}}
+function settings(){return `<h2>Order cut-off time</h2><div class="card grid"><p class="mute">Shops order for tomorrow. They can place or change orders until this time (24h, India time).</p><input type="time" id="co" value="${D.settings.cutoff}"><button onclick="saveCutoff()">Save time</button></div>
+ <h2>Change admin password</h2><div class="card grid"><input type="password" id="np" placeholder="New password (min 6)"><button onclick="savePw()">Change password</button></div>`}
+async function saveCutoff(){try{await api('settings',{cutoff:$('#co').value});msg='Saved ✔'}catch(e){msg=e.message}render()}
+async function savePw(){try{await api('password',{password:$('#np').value});msg='Password changed ✔'}catch(e){msg=e.message}render()}
+function render(){const a=$('#app');
+ if(!token){a.innerHTML=`<header><h1>🫓 Ruchi Food Products</h1></header><div class="card grid"><label>Admin password<input id="pw" type="password"></label><button onclick="login()">Login</button></div>${msg?`<div class="msg err">${esc(msg)}</div>`:''}`;return}
+ a.innerHTML=`<header><h1>🫓 Ruchi Food Products</h1><button class="ghost small" onclick="logout()">Logout</button></header>${tabs()}${msg?`<div class="msg ${/✔/.test(msg)?'ok':'err'}">${esc(msg)}</div>`:''}${({daily,monthly,products,shops,settings})[tab]()}`}
+if(token)go('daily');else render();
+</script></body></html>

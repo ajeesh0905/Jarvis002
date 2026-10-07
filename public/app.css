@@ -1,0 +1,33 @@
+:root{--bg:#faf6ef;--card:#fff;--ink:#2b2118;--mute:#7a6a5a;--brand:#c2570c;--line:#eadfce;--ok:#2e7d32;--err:#b3261e}
+@media(prefers-color-scheme:dark){:root{--bg:#1c1712;--card:#27201a;--ink:#f3e9dc;--mute:#b3a493;--brand:#f08a3c;--line:#3a3027}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 system-ui,"Noto Sans Malayalam",sans-serif}
+main{max-width:720px;margin:0 auto;padding:16px}
+h1{font-size:1.25rem;margin:0}h2{font-size:1.05rem;margin:18px 0 8px}
+header{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:10px}
+.row{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.mute{color:var(--mute);font-size:.9rem}
+input,select,button{font:inherit;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
+input{width:100%}
+button{background:var(--brand);color:#fff;border:0;font-weight:600;cursor:pointer}
+button.ghost{background:transparent;color:var(--brand);border:1px solid var(--brand)}
+button.small{padding:6px 10px;font-size:.85rem}
+button:disabled{opacity:.5}
+.qty{display:flex;align-items:center;gap:6px}
+.qty button{width:40px;height:40px;padding:0;font-size:1.3rem}
+.qty input{width:64px;text-align:center}
+.msg{padding:10px;border-radius:10px;margin:8px 0}.msg.ok{background:#e6f4e7;color:var(--ok)}.msg.err{background:#fde7e5;color:var(--err)}
+.banner{background:#fff3e0;color:#7a4300;padding:10px;border-radius:10px;margin-bottom:10px}
+.tabs{display:flex;gap:6px;overflow-x:auto;margin-bottom:12px}
+.tabs button{background:var(--card);color:var(--ink);border:1px solid var(--line);white-space:nowrap}
+.tabs button.on{background:var(--brand);color:#fff;border-color:var(--brand)}
+table{width:100%;border-collapse:collapse;font-size:.92rem}
+th,td{text-align:left;padding:7px 6px;border-bottom:1px solid var(--line)}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+.grid{display:grid;gap:8px}.grid2{grid-template-columns:1fr 1fr}
+.kpi{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px;margin-bottom:10px}
+.kpi div{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px}
+.kpi b{display:block;font-size:1.25rem}
+.bar{height:8px;background:var(--brand);border-radius:4px;min-width:2px}
+.total{position:sticky;bottom:0;background:var(--bg);padding:10px 0}
