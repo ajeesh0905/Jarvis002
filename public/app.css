@@ -42,3 +42,4 @@ a{color:var(--brand)}
  .card{border:1px solid #999;break-inside:avoid;background:#fff}
  main{max-width:none;padding:0}
 }
+h2.cat{margin:16px 0 6px;font-size:.95rem;color:var(--mute);text-transform:uppercase;letter-spacing:.04em}

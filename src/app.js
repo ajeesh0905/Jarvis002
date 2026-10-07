@@ -172,7 +172,7 @@ export function createHandler({ db, env }) {
     if (!shop) throw new HttpError(401, 'Not logged in');
     const date = await orderDate();
     const skipped = date !== tomorrowIST() ? await offReason(tomorrowIST()) : null;
-    const products = await db.all('SELECT id,name_en,name_ml,price FROM products WHERE active=1 ORDER BY sort,id');
+    const products = await db.all('SELECT id,name_en,name_ml,price,category FROM products WHERE active=1 ORDER BY sort,id');
     const qty = Object.fromEntries((await db.all('SELECT product_id,qty FROM orders WHERE shop_id=? AND date=?', id, date)).map(r => [r.product_id, r.qty]));
     return { shop, date, skipped, cutoff: await cutoff(), locked: await isLocked(date), products: products.map(p => ({ ...p, qty: qty[p.id] || 0 })) };
   });
@@ -245,9 +245,19 @@ export function createHandler({ db, env }) {
     const b = await body(req);
     const name = String(b.name_en || '').trim(); if (!name) throw bad('English name required');
     const price = b.price === '' || b.price == null ? 0 : num(b.price, 'price'); // 0 = market price
-    const ml = String(b.name_ml || '').trim();
-    if (b.id) await db.run('UPDATE products SET name_en=?,name_ml=?,price=?,active=?,sort=? WHERE id=?', name, ml, price, b.active === 0 || b.active === false ? 0 : 1, Math.floor(num(b.sort || 0, 'sort', -1e6)), num(b.id, 'id'));
-    else await db.run('INSERT INTO products(name_en,name_ml,price) VALUES(?,?,?)', name, ml, price);
+    const ml = String(b.name_ml || '').trim(), category = String(b.category || '').trim().slice(0, 40);
+    if (b.id) await db.run('UPDATE products SET name_en=?,name_ml=?,price=?,active=?,category=? WHERE id=?', name, ml, price, b.active === 0 || b.active === false ? 0 : 1, category, num(b.id, 'id'));
+    else await db.run('INSERT INTO products(name_en,name_ml,price,category,sort) VALUES(?,?,?,?,(SELECT COALESCE(MAX(sort),0)+1 FROM products))', name, ml, price, category);
+    return { ok: true };
+  });
+  route('POST', '/api/admin/products/move', async (req) => { // move a product up/down in the list shops see
+    await auth(req, 'admin');
+    const b = await body(req), id = num(b.id, 'id');
+    const ids = (await db.all('SELECT id FROM products ORDER BY sort,id')).map(r => r.id);
+    const i = ids.indexOf(id), j = i + (b.dir === 'up' ? -1 : 1);
+    if (i < 0 || j < 0 || j >= ids.length) return { ok: true };
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+    await db.batch(ids.map((pid, k) => ['UPDATE products SET sort=? WHERE id=?', [k + 1, pid]]));
     return { ok: true };
   });
 

@@ -6,6 +6,9 @@ export function nodeDb(file, schemaPath) {
   const d = new DatabaseSync(file);
   d.exec('PRAGMA journal_mode = WAL');
   d.exec(fs.readFileSync(schemaPath, 'utf8'));
+  // upgrade databases created before categories existed
+  if (!d.prepare('PRAGMA table_info(products)').all().some(c => c.name === 'category'))
+    d.exec("ALTER TABLE products ADD COLUMN category TEXT NOT NULL DEFAULT ''");
   return {
     async all(sql, ...p) { return d.prepare(sql).all(...p).map(r => ({ ...r })); },
     async get(sql, ...p) { const r = d.prepare(sql).get(...p); return r ? { ...r } : undefined; },

@@ -44,3 +44,7 @@ Run this regularly and keep the file somewhere safe (USB / Drive).
 
 ## Updating
 After code changes: `npx wrangler deploy`. Your data stays.
+
+## Upgrading an existing Cloudflare database (only if you deployed before product categories existed)
+    npx wrangler d1 execute ruchi-db --remote --command "ALTER TABLE products ADD COLUMN category TEXT NOT NULL DEFAULT ''"
+(New databases created from `src/schema.sql` already have it. Node/own-computer installs upgrade automatically.)
