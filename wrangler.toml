@@ -1,0 +1,13 @@
+name = "ruchi-food-products"
+main = "src/worker.js"
+compatibility_date = "2025-06-01"
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = ["/api/*"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "ruchi-db"
+database_id = "REPLACE_WITH_YOUR_DATABASE_ID"

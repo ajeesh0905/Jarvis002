@@ -2,8 +2,8 @@
 
 Shops book tomorrow's quantities (chappathi, idiyappam, …) from their phone; the owner sees daily totals and month-end analysis.
 
-## Run
-Requires Node >= 22.13 (no npm install needed).
+## Run on your own computer
+See `local/LOCAL.md` (data stays on your computer). Requires Node >= 22.13, no npm install needed.
 
     ADMIN_PASSWORD=yourpassword npm start
 
@@ -13,7 +13,8 @@ Requires Node >= 22.13 (no npm install needed).
 Data is stored in `data/orders.db` (SQLite). Back this folder up; set `DATA_DIR` to relocate it.
 
 ## Deploy
-See `deploy/DEPLOY.md` (Oracle Cloud Always Free, with HTTPS and daily backups).
+- `deploy/DEPLOY.md` – Oracle Cloud Always Free VM (needs a card)
+- `cloudflare/CLOUDFLARE.md` – Cloudflare Workers + D1 (free, no card, always on)
 
 ## Features
 - Shop login with phone + PIN; quantities with +/− buttons; prices shown; total

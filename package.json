@@ -1,9 +1,14 @@
 {
   "name": "ruchi-food-products",
   "version": "1.0.0",
+  "private": true,
   "description": "Ruchi Food Products - daily order booking for shops with admin analysis",
-  "main": "server.js",
-  "scripts": { "start": "node server.js" },
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "cf:dev": "wrangler dev",
+    "cf:deploy": "wrangler deploy"
+  },
   "engines": { "node": ">=22.13" },
-  "license": "MIT"
+  "devDependencies": { "wrangler": "^4" }
 }
