@@ -19,7 +19,7 @@ async function go(t){tab=t;msg='';try{
  if(t==='shops')D.shops=await api('shops');
  if(t==='settings')D.settings=await api('settings');
  }catch(e){msg=e.message}render()}
-const names=p=>esc(p.name_en)+(p.name_ml?` <span class="mute">${esc(p.name_ml)}</span>`:'');
+const names=p=>esc(p.name_en);
 function tabs(){return `<div class="tabs">${[['daily','Daily'],['monthly','Monthly'],['products','Products'],['shops','Shops'],['settings','Settings']].map(([k,l])=>`<button class="${tab===k?'on':''}" onclick="go('${k}')">${l}</button>`).join('')}</div>`}
 function daily(){const d=D.daily;if(!d)return'';
  return `<div class="card row"><label>Date <input type="date" value="${d.date}" onchange="D.date=this.value;go('daily')"></label><div class="kpi" style="margin:0"><div><span class="mute">Total</span><b>${inr(d.total)}</b></div></div></div>

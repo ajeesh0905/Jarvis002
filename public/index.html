@@ -7,7 +7,9 @@
 <script>
 const T={ml:{title:'ദിവസ ഓർഡർ',phone:'ഫോൺ നമ്പർ',pin:'PIN',login:'ലോഗിൻ',logout:'ലോഗൗട്ട്',for:'ഡെലിവറി തീയതി',cutoff:'ഓർഡർ സമയം അവസാനിക്കുന്നത്',locked:'ഓർഡർ സമയം കഴിഞ്ഞു. ഇനി മാറ്റാൻ കഴിയില്ല.',save:'ഓർഡർ സേവ് ചെയ്യുക',saved:'ഓർഡർ സേവ് ചെയ്തു ✔',total:'ആകെ',none:'ഉൽപ്പന്നങ്ങൾ ഒന്നുമില്ല',lang:'English'},
 en:{title:'Daily Order',phone:'Phone number',pin:'PIN',login:'Login',logout:'Logout',for:'Delivery date',cutoff:'Order closes at',locked:'Order time is over. Changes are not allowed.',save:'Save order',saved:'Order saved ✔',total:'Total',none:'No products',lang:'മലയാളം'}};
-let lang=localStorage.lang||'ml',token=localStorage.token||'',state=null,msg='';
+let lang=localStorage.lang||'en',token=localStorage.token||'',state=null,msg='';
+const fmtDate=d=>new Date(d+'T00:00:00').toLocaleDateString(lang==='ml'?'ml-IN':'en-IN',{weekday:'short',day:'numeric',month:'short',year:'numeric'});
+const fmtTime=h=>{const[a,b]=h.split(':');const n=+a;return (n%12||12)+':'+b+' '+(n<12?'AM':'PM')};
 const t=k=>T[lang][k],$=s=>document.querySelector(s);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 async function api(p,body){const r=await fetch('/api/'+p,{method:body?'POST':'GET',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:body?JSON.stringify(body):undefined});
@@ -18,14 +20,14 @@ const head=()=>`<header><h1>🫓 Ruchi Food Products</h1><div><button class="gho
 async function doLogin(){msg='';try{const r=await api('shop/login',{phone:$('#ph').value,pin:$('#pn').value});token=r.token;localStorage.token=token;await load()}catch(e){msg=e.message;render()}}
 async function load(){try{state=await api('shop/order');msg=''}catch(e){msg=e.message}render()}
 function step(id,d){const i=$('#q'+id);i.value=Math.max(0,(+i.value||0)+d);calc()}
-function calc(){let s=0;state.products.forEach(p=>{s+=(+$('#q'+p.id).value||0)*p.price});$('#tot').textContent='₹'+s.toFixed(2)}
+function calc(){let s=0;state.products.forEach(p=>{s+=(+$('#q'+p.id).value||0)*p.price});$('#tot').textContent='₹'+s.toLocaleString('en-IN',{maximumFractionDigits:2})}
 async function save(){const items=state.products.map(p=>({product_id:p.id,qty:+$('#q'+p.id).value||0}));
  try{await api('shop/order',{items});msg='ok'}catch(e){msg=e.message}await load()}
 function render(){const a=$('#app');
  if(!token){a.innerHTML=head()+`<div class="card grid"><label>${t('phone')}<input id="ph" inputmode="numeric" maxlength="10"></label><label>${t('pin')}<input id="pn" type="password" inputmode="numeric" maxlength="6"></label><button onclick="doLogin()">${t('login')}</button></div>${msg?`<div class="msg err">${esc(msg)}</div>`:''}`;return}
  if(!state){a.innerHTML=head()+'<p class="mute">…</p>';load();return}
  const L=state.locked,name=lang==='ml'?(p=>p.name_ml||p.name_en):(p=>p.name_en);
- a.innerHTML=head()+`<div class="card"><b>${esc(state.shop.name)}</b><div class="mute">${t('for')}: ${state.date} · ${t('cutoff')}: ${state.cutoff}</div></div>
+ a.innerHTML=head()+`<div class="card"><b>${esc(state.shop.name)}</b><div class="mute">${t('for')}: <b>${fmtDate(state.date)}</b></div><div class="mute">${t('cutoff')}: <b>${fmtTime(state.cutoff)}</b></div></div>
  ${L?`<div class="banner">${t('locked')}</div>`:''}
  ${msg==='ok'?`<div class="msg ok">${t('saved')}</div>`:msg?`<div class="msg err">${esc(msg)}</div>`:''}
  ${state.products.length?state.products.map(p=>`<div class="card row"><div><b>${esc(name(p))}</b><div class="mute">₹${p.price}</div></div>

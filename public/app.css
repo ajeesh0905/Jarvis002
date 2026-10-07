@@ -31,3 +31,5 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
 .kpi b{display:block;font-size:1.25rem}
 .bar{height:8px;background:var(--brand);border-radius:4px;min-width:2px}
 .total{position:sticky;bottom:0;background:var(--bg);padding:10px 0}
+header{flex-wrap:nowrap}header h1{font-size:1.1rem}header>div{display:flex;gap:6px;flex-shrink:0}
+a{color:var(--brand)}
