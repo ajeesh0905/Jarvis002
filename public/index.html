@@ -18,11 +18,11 @@ function logout(){token='';localStorage.removeItem('token');state=null;render()}
 function setLang(){lang=lang==='ml'?'en':'ml';localStorage.lang=lang;render()}
 const head=()=>`<header><h1>🫓 Ruchi Food Products</h1><div><button class="ghost small" onclick="setLang()">${t('lang')}</button> ${token?`<button class="ghost small" onclick="logout()">${t('logout')}</button>`:''}</div></header>`;
 async function doLogin(){msg='';try{const r=await api('shop/login',{phone:$('#ph').value,pin:$('#pn').value});token=r.token;localStorage.token=token;await load()}catch(e){msg=e.message;render()}}
-async function load(){try{state=await api('shop/order');msg=''}catch(e){msg=e.message}render()}
+async function load(keepMsg){try{state=await api('shop/order');if(!keepMsg)msg=''}catch(e){msg=e.message}render()}
 function step(id,d){const i=$('#q'+id);i.value=Math.max(0,(+i.value||0)+d);calc()}
 function calc(){let s=0;state.products.forEach(p=>{s+=(+$('#q'+p.id).value||0)*p.price});$('#totwrap').style.visibility=state.products.some(p=>p.price>0)?'visible':'hidden';$('#tot').textContent='₹'+s.toLocaleString('en-IN',{maximumFractionDigits:2})}
 async function save(){const items=state.products.map(p=>({product_id:p.id,qty:+$('#q'+p.id).value||0}));
- try{await api('shop/order',{items});msg='ok'}catch(e){msg=e.message}await load()}
+ try{await api('shop/order',{items});msg='ok'}catch(e){msg=e.message}await load(true)}
 function render(){const a=$('#app');
  if(!token){a.innerHTML=head()+`<div class="card grid"><label>${t('phone')}<input id="ph" inputmode="numeric" maxlength="10"></label><label>${t('pin')}<input id="pn" type="password" inputmode="numeric" maxlength="6"></label><button onclick="doLogin()">${t('login')}</button></div>${msg?`<div class="msg err">${esc(msg)}</div>`:''}`;return}
  if(!state){a.innerHTML=head()+'<p class="mute">…</p>';load();return}
