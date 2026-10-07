@@ -33,3 +33,12 @@ td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
 .total{position:sticky;bottom:0;background:var(--bg);padding:10px 0}
 header{flex-wrap:nowrap}header h1{font-size:1.1rem}header>div{display:flex;gap:6px;flex-shrink:0}
 a{color:var(--brand)}
+
+.printonly{display:none}
+@media print{
+ body{background:#fff;color:#000}
+ .noprint,.tabs,header,button,.msg{display:none!important}
+ .printonly{display:block}
+ .card{border:1px solid #999;break-inside:avoid;background:#fff}
+ main{max-width:none;padding:0}
+}

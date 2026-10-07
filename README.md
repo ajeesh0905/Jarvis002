@@ -18,4 +18,8 @@ Data is stored in `data/orders.db` (SQLite). Back this folder up; set `DATA_DIR`
 - Admin: daily "total to prepare", per-shop orders, shops not yet ordered, edit any order
 - Products with English + Malayalam names and prices (add / edit / hide)
 - Monthly analysis: revenue, top shops, product totals, day-by-day, CSV download
+- Daily production list: Print, share on WhatsApp, or copy as text
+- Order alerts: every order placed / changed / cancelled by a shop appears in Admin → Alerts (pop-up if browser alerts are enabled). For phone push when the page is closed, set `NOTIFY_URL`, e.g. `NOTIFY_URL=https://ntfy.sh/<your-secret-topic> npm start` and subscribe to that topic in the free ntfy app
+- Delivery & payments: mark each shop's delivery, record payments, see dues per shop (Admin → Dues). Only delivered orders are counted
+- Holidays & weekly off days (Admin → Settings): shops are automatically moved to the next working day
 - Price is saved with each order, so later price changes don't alter past records

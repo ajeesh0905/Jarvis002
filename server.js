@@ -29,6 +29,18 @@ db.exec(`
     PRIMARY KEY (shop_id, product_id, date)
   );
   CREATE INDEX IF NOT EXISTS idx_orders_date ON orders(date);
+  CREATE TABLE IF NOT EXISTS holidays (date TEXT PRIMARY KEY, note TEXT NOT NULL DEFAULT '');
+  CREATE TABLE IF NOT EXISTS deliveries (
+    shop_id INTEGER NOT NULL, date TEXT NOT NULL, delivered INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (shop_id, date)
+  );
+  CREATE TABLE IF NOT EXISTS payments (
+    id INTEGER PRIMARY KEY, shop_id INTEGER NOT NULL, date TEXT NOT NULL,
+    amount REAL NOT NULL, note TEXT NOT NULL DEFAULT ''
+  );
+  CREATE TABLE IF NOT EXISTS notifications (
+    id INTEGER PRIMARY KEY, ts TEXT NOT NULL, text TEXT NOT NULL, seen INTEGER NOT NULL DEFAULT 0
+  );
 `);
 
 // ---------- helpers ----------
@@ -46,10 +58,28 @@ function setSetting(k, v) {
   db.prepare('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(k, String(v));
 }
 const cutoff = () => getSetting('cutoff', '20:00');
-function isLocked() {
-  const n = istNow();
-  const hm = n.toISOString().slice(11, 16);
-  return hm >= cutoff();
+const addDays = (d, n) => ymd(new Date(new Date(d + 'T00:00:00Z').getTime() + n * 86400000));
+const weeklyOff = () => getSetting('weekly_off', '').split(',').filter(x => x !== '').map(Number);
+// Why a date has no production/delivery (holiday or weekly off), or null if it is a normal day.
+function offReason(d) {
+  const h = db.prepare('SELECT note FROM holidays WHERE date=?').get(d);
+  if (h) return h.note || 'Holiday';
+  return weeklyOff().includes(new Date(d + 'T00:00:00Z').getUTCDay()) ? 'Weekly off' : null;
+}
+// The delivery date shops are currently ordering for: tomorrow, skipping holidays / weekly off.
+function orderDate() {
+  let d = tomorrowIST();
+  for (let i = 0; i < 60 && offReason(d); i++) d = addDays(d, 1);
+  return d;
+}
+// Orders for a date close at the cut-off time on the day before it.
+function isLocked(od) {
+  return istNow().toISOString().slice(0, 16) >= addDays(od, -1) + 'T' + cutoff();
+}
+function notify(text) {
+  db.prepare('INSERT INTO notifications(ts,text) VALUES(?,?)').run(new Date().toISOString(), text);
+  const url = process.env.NOTIFY_URL; // optional push, e.g. https://ntfy.sh/<your-secret-topic>
+  if (url) fetch(url, { method: 'POST', body: text, headers: { Title: 'Ruchi Food Products' } }).catch(() => {});
 }
 
 function hashPin(pin, salt = crypto.randomBytes(8).toString('hex')) {
@@ -126,7 +156,7 @@ const validMonth = (m) => /^\d{4}-\d{2}$/.test(m || '') ? m : (() => { throw bad
 const routes = [];
 const route = (method, p, fn) => routes.push({ method, p, fn });
 
-route('GET', '/api/config', () => ({ cutoff: cutoff(), today: todayIST(), orderDate: tomorrowIST(), locked: isLocked() }));
+route('GET', '/api/config', () => { const od = orderDate(); return { cutoff: cutoff(), today: todayIST(), orderDate: od, locked: isLocked(od) }; });
 
 // Shop
 route('POST', '/api/shop/login', async (req) => {
@@ -142,18 +172,27 @@ route('GET', '/api/shop/order', (req) => {
   const { id } = auth(req, 'shop');
   const shop = db.prepare('SELECT id,name FROM shops WHERE id=? AND active=1').get(id);
   if (!shop) throw new HttpError(401, 'Not logged in');
-  const date = tomorrowIST();
+  const date = orderDate();
+  const skipped = date !== tomorrowIST() ? offReason(tomorrowIST()) : null;
   const products = db.prepare('SELECT id,name_en,name_ml,price FROM products WHERE active=1 ORDER BY sort,id').all();
   const qty = Object.fromEntries(db.prepare('SELECT product_id,qty FROM orders WHERE shop_id=? AND date=?').all(id, date).map(r => [r.product_id, r.qty]));
-  return { shop, date, cutoff: cutoff(), locked: isLocked(), products: products.map(p => ({ ...p, qty: qty[p.id] || 0 })) };
+  return { shop, date, skipped, cutoff: cutoff(), locked: isLocked(date), products: products.map(p => ({ ...p, qty: qty[p.id] || 0 })) };
 });
 
 route('POST', '/api/shop/order', async (req) => {
   const { id } = auth(req, 'shop');
-  if (isLocked()) throw new HttpError(403, 'Order time is over');
+  const date = orderDate();
+  if (isLocked(date)) throw new HttpError(403, 'Order time is over');
   const { items } = await readJson(req);
   if (!Array.isArray(items)) throw bad('items required');
-  saveOrder(id, tomorrowIST(), items);
+  const count = () => db.prepare('SELECT COUNT(*) c FROM orders WHERE shop_id=? AND date=?').get(id, date).c;
+  const had = count() > 0;
+  saveOrder(id, date, items);
+  const lines = db.prepare('SELECT p.name_en n, o.qty q FROM orders o JOIN products p ON p.id=o.product_id WHERE o.shop_id=? AND o.date=? ORDER BY p.sort,p.id').all(id, date);
+  const shop = db.prepare('SELECT name FROM shops WHERE id=?').get(id).name;
+  const when = new Date(date + 'T00:00:00Z').toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
+  if (lines.length) notify(`${shop} ${had ? 'updated' : 'placed'} order for ${when}: ${lines.map(l => `${l.n} ${l.q}`).join(', ')}`);
+  else if (had) notify(`${shop} cancelled order for ${when}`);
   return { ok: true };
 });
 
@@ -189,12 +228,32 @@ route('POST', '/api/admin/password', async (req) => {
   setSetting('admin_hash', hashPin(password));
   return { ok: true };
 });
-route('GET', '/api/admin/settings', (req) => { auth(req, 'admin'); return { cutoff: cutoff() }; });
+route('GET', '/api/admin/settings', (req) => {
+  auth(req, 'admin');
+  return { cutoff: cutoff(), weeklyOff: weeklyOff(), holidays: db.prepare('SELECT date,note FROM holidays WHERE date>=? ORDER BY date').all(todayIST()), orderDate: orderDate() };
+});
 route('POST', '/api/admin/settings', async (req) => {
   auth(req, 'admin');
-  const { cutoff: c } = await readJson(req);
-  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(c || '')) throw bad('Time must be HH:MM (24h)');
-  setSetting('cutoff', c);
+  const b = await readJson(req);
+  if (b.cutoff !== undefined) {
+    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(b.cutoff || '')) throw bad('Time must be HH:MM (24h)');
+    setSetting('cutoff', b.cutoff);
+  }
+  if (b.weeklyOff !== undefined) {
+    if (!Array.isArray(b.weeklyOff) || b.weeklyOff.some(n => !Number.isInteger(n) || n < 0 || n > 6)) throw bad('Invalid weekly off');
+    setSetting('weekly_off', b.weeklyOff.join(','));
+  }
+  return { ok: true };
+});
+route('POST', '/api/admin/holidays', async (req) => {
+  auth(req, 'admin');
+  const b = await readJson(req);
+  db.prepare('INSERT INTO holidays(date,note) VALUES(?,?) ON CONFLICT(date) DO UPDATE SET note=excluded.note').run(validDate(b.date), String(b.note || '').trim().slice(0, 60));
+  return { ok: true };
+});
+route('POST', '/api/admin/holidays/delete', async (req) => {
+  auth(req, 'admin');
+  db.prepare('DELETE FROM holidays WHERE date=?').run(validDate((await readJson(req)).date));
   return { ok: true };
 });
 
@@ -236,20 +295,21 @@ route('POST', '/api/admin/shops', async (req) => {
 // Daily summary: totals per product + per-shop matrix
 route('GET', '/api/admin/daily', (req, url) => {
   auth(req, 'admin');
-  const date = validDate(url.searchParams.get('date') || tomorrowIST());
+  const date = validDate(url.searchParams.get('date') || orderDate());
   const rows = db.prepare(`SELECT o.shop_id, s.name shop, o.product_id, p.name_en, p.name_ml, o.qty, CASE WHEN o.price>0 THEN o.price ELSE p.price END AS price
     FROM orders o JOIN shops s ON s.id=o.shop_id JOIN products p ON p.id=o.product_id WHERE o.date=? ORDER BY s.name, p.sort, p.id`).all(date);
+  const delivered = new Set(db.prepare('SELECT shop_id FROM deliveries WHERE date=? AND delivered=1').all(date).map(r => r.shop_id));
   const products = {}, shops = {};
   let total = 0;
   for (const r of rows) {
     const amt = r.qty * r.price; total += amt;
     (products[r.product_id] ||= { id: r.product_id, name_en: r.name_en, name_ml: r.name_ml, qty: 0, amount: 0 });
     products[r.product_id].qty += r.qty; products[r.product_id].amount += amt;
-    (shops[r.shop_id] ||= { id: r.shop_id, name: r.shop, amount: 0, items: [] });
+    (shops[r.shop_id] ||= { id: r.shop_id, name: r.shop, amount: 0, delivered: delivered.has(r.shop_id), items: [] });
     shops[r.shop_id].amount += amt; shops[r.shop_id].items.push({ product_id: r.product_id, name_en: r.name_en, name_ml: r.name_ml, qty: r.qty });
   }
   const notOrdered = db.prepare(`SELECT id,name,phone FROM shops WHERE active=1 AND id NOT IN (SELECT shop_id FROM orders WHERE date=?) ORDER BY name`).all(date);
-  return { date, total, products: Object.values(products), shops: Object.values(shops), notOrdered };
+  return { date, off: offReason(date), total, products: Object.values(products), shops: Object.values(shops), notOrdered };
 });
 
 // Admin edits a shop's order for a date
@@ -258,6 +318,60 @@ route('POST', '/api/admin/order', async (req) => {
   const b = await readJson(req);
   if (!Array.isArray(b.items)) throw bad('items required');
   saveOrder(num(b.shop_id, 'shop'), validDate(b.date), b.items);
+  return { ok: true };
+});
+
+// Delivery tracking
+route('POST', '/api/admin/delivered', async (req) => {
+  auth(req, 'admin');
+  const b = await readJson(req);
+  const date = validDate(b.date), flag = b.delivered === false || b.delivered === 0 ? 0 : 1;
+  const ids = b.all ? db.prepare('SELECT DISTINCT shop_id FROM orders WHERE date=?').all(date).map(r => r.shop_id) : [num(b.shop_id, 'shop')];
+  const up = db.prepare('INSERT INTO deliveries(shop_id,date,delivered) VALUES(?,?,?) ON CONFLICT(shop_id,date) DO UPDATE SET delivered=excluded.delivered');
+  for (const id of ids) up.run(id, date, flag);
+  return { ok: true };
+});
+
+// Dues: delivered value - payments received, per shop
+route('GET', '/api/admin/dues', (req) => {
+  auth(req, 'admin');
+  const billed = db.prepare(`SELECT o.shop_id, SUM(o.qty * CASE WHEN o.price>0 THEN o.price ELSE p.price END) amount,
+      SUM(CASE WHEN (CASE WHEN o.price>0 THEN o.price ELSE p.price END)=0 THEN 1 ELSE 0 END) unpriced
+    FROM orders o JOIN products p ON p.id=o.product_id
+    JOIN deliveries d ON d.shop_id=o.shop_id AND d.date=o.date AND d.delivered=1 GROUP BY o.shop_id`).all();
+  const paid = db.prepare('SELECT shop_id, SUM(amount) amount FROM payments GROUP BY shop_id').all();
+  const b = Object.fromEntries(billed.map(r => [r.shop_id, r])), p = Object.fromEntries(paid.map(r => [r.shop_id, r.amount]));
+  const shops = db.prepare('SELECT id,name,phone FROM shops ORDER BY name').all()
+    .map(s => ({ ...s, billed: b[s.id]?.amount || 0, unpriced: b[s.id]?.unpriced || 0, paid: p[s.id] || 0 }))
+    .map(s => ({ ...s, balance: s.billed - s.paid }))
+    .filter(s => s.billed || s.paid);
+  const payments = db.prepare('SELECT p.id,p.date,p.amount,p.note,s.name shop FROM payments p JOIN shops s ON s.id=p.shop_id ORDER BY p.date DESC,p.id DESC LIMIT 50').all();
+  return { shops, payments, totalDue: shops.reduce((a, s) => a + s.balance, 0) };
+});
+route('POST', '/api/admin/payments', async (req) => {
+  auth(req, 'admin');
+  const b = await readJson(req);
+  const amount = num(b.amount, 'amount');
+  if (!amount) throw bad('Enter an amount');
+  const shop = num(b.shop_id, 'shop');
+  if (!db.prepare('SELECT 1 FROM shops WHERE id=?').get(shop)) throw bad('Unknown shop');
+  db.prepare('INSERT INTO payments(shop_id,date,amount,note) VALUES(?,?,?,?)').run(shop, validDate(b.date || todayIST()), amount, String(b.note || '').trim().slice(0, 80));
+  return { ok: true };
+});
+route('POST', '/api/admin/payments/delete', async (req) => {
+  auth(req, 'admin');
+  db.prepare('DELETE FROM payments WHERE id=?').run(num((await readJson(req)).id, 'id'));
+  return { ok: true };
+});
+
+// Order alerts
+route('GET', '/api/admin/notifications', (req) => {
+  auth(req, 'admin');
+  return { unseen: db.prepare('SELECT COUNT(*) c FROM notifications WHERE seen=0').get().c, items: db.prepare('SELECT id,ts,text,seen FROM notifications ORDER BY id DESC LIMIT 40').all() };
+});
+route('POST', '/api/admin/notifications/seen', (req) => {
+  auth(req, 'admin');
+  db.prepare('UPDATE notifications SET seen=1 WHERE seen=0').run();
   return { ok: true };
 });
 

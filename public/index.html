@@ -5,8 +5,8 @@
 <meta name="theme-color" content="#c2570c"><link rel="stylesheet" href="app.css">
 </head><body><main id="app"></main>
 <script>
-const T={ml:{market:'മാർക്കറ്റ് വില',title:'ദിവസ ഓർഡർ',phone:'ഫോൺ നമ്പർ',pin:'PIN',login:'ലോഗിൻ',logout:'ലോഗൗട്ട്',for:'ഡെലിവറി തീയതി',cutoff:'ഓർഡർ സമയം അവസാനിക്കുന്നത്',locked:'ഓർഡർ സമയം കഴിഞ്ഞു. ഇനി മാറ്റാൻ കഴിയില്ല.',save:'ഓർഡർ സേവ് ചെയ്യുക',saved:'ഓർഡർ സേവ് ചെയ്തു ✔',total:'ആകെ',none:'ഉൽപ്പന്നങ്ങൾ ഒന്നുമില്ല',lang:'English'},
-en:{market:'Market price',title:'Daily Order',phone:'Phone number',pin:'PIN',login:'Login',logout:'Logout',for:'Delivery date',cutoff:'Order closes at',locked:'Order time is over. Changes are not allowed.',save:'Save order',saved:'Order saved ✔',total:'Total',none:'No products',lang:'മലയാളം'}};
+const T={ml:{market:'മാർക്കറ്റ് വില',skip:'നാളെ ഡെലിവറി ഇല്ല ({r}). അടുത്ത പ്രവൃത്തി ദിവസത്തേക്കാണ് ഓർഡർ.',title:'ദിവസ ഓർഡർ',phone:'ഫോൺ നമ്പർ',pin:'PIN',login:'ലോഗിൻ',logout:'ലോഗൗട്ട്',for:'ഡെലിവറി തീയതി',cutoff:'ഓർഡർ സമയം അവസാനിക്കുന്നത്',locked:'ഓർഡർ സമയം കഴിഞ്ഞു. ഇനി മാറ്റാൻ കഴിയില്ല.',save:'ഓർഡർ സേവ് ചെയ്യുക',saved:'ഓർഡർ സേവ് ചെയ്തു ✔',total:'ആകെ',none:'ഉൽപ്പന്നങ്ങൾ ഒന്നുമില്ല',lang:'English'},
+en:{market:'Market price',skip:'No delivery tomorrow ({r}). You are ordering for the next working day.',title:'Daily Order',phone:'Phone number',pin:'PIN',login:'Login',logout:'Logout',for:'Delivery date',cutoff:'Order closes at',locked:'Order time is over. Changes are not allowed.',save:'Save order',saved:'Order saved ✔',total:'Total',none:'No products',lang:'മലയാളം'}};
 let lang=localStorage.lang||'en',token=localStorage.token||'',state=null,msg='';
 const fmtDate=d=>new Date(d+'T00:00:00').toLocaleDateString(lang==='ml'?'ml-IN':'en-IN',{weekday:'short',day:'numeric',month:'short',year:'numeric'});
 const fmtTime=h=>{const[a,b]=h.split(':');const n=+a;return (n%12||12)+':'+b+' '+(n<12?'AM':'PM')};
@@ -28,6 +28,7 @@ function render(){const a=$('#app');
  if(!state){a.innerHTML=head()+'<p class="mute">…</p>';load();return}
  const L=state.locked,name=lang==='ml'?(p=>p.name_ml||p.name_en):(p=>p.name_en);
  a.innerHTML=head()+`<div class="card"><b>${esc(state.shop.name)}</b><div class="mute">${t('for')}: <b>${fmtDate(state.date)}</b></div><div class="mute">${t('cutoff')}: <b>${fmtTime(state.cutoff)}</b></div></div>
+ ${state.skipped?`<div class="banner">${t('skip').replace('{r}',esc(state.skipped))}</div>`:''}
  ${L?`<div class="banner">${t('locked')}</div>`:''}
  ${msg==='ok'?`<div class="msg ok">${t('saved')}</div>`:msg?`<div class="msg err">${esc(msg)}</div>`:''}
  ${state.products.length?state.products.map(p=>`<div class="card row"><div><b>${esc(name(p))}</b><div class="mute">${p.price>0?'₹'+p.price:t('market')}</div></div>
