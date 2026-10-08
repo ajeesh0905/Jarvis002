@@ -1,0 +1,25 @@
+RUCHI FOOD PRODUCTS - DAILY ORDER APP
+=====================================
+
+STEP 0 (once): Install Node.js
+  Go to https://nodejs.org, download the "LTS" version, install it (keep clicking Next).
+
+TO TRY IT ON THIS LAPTOP (data stays on this laptop)
+  1. Double-click  START-WINDOWS.bat      (Mac/Linux: run START-MAC-LINUX.sh)
+  2. Your browser opens the ADMIN page.  Password:  admin123
+  3. Admin > Settings: change the password.
+     Admin > Products > "+ Add product" and Shops > "+ Add shop".
+  4. Shop screen: open  http://localhost:3000/  and log in with a shop's phone + PIN.
+  5. Close the black window to stop. Your data is saved in the "data" folder.
+
+TO PUT IT ONLINE FOR REAL SHOPS (free, no card)
+  Double-click  DEPLOY-TO-CLOUDFLARE.bat
+  It asks you to log in to a free Cloudflare account, then does everything else and
+  prints your shop address and admin address.
+  (If anything fails, copy the red message and send it for help. It is safe to run again.)
+
+BACKUPS
+  Own laptop : copy the "data" folder to a USB drive now and then.
+  Cloudflare : see cloudflare\CLOUDFLARE.md (one command makes a backup file).
+
+MORE DETAILS: README.md, local\LOCAL.md, cloudflare\CLOUDFLARE.md

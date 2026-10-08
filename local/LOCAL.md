@@ -7,8 +7,8 @@ unless you choose to share it online (step 3).
 Download the **LTS** version (v22 or newer) from https://nodejs.org and install it.
 
 ## 2. Start the app
-- **Windows:** double-click `local/start-windows.bat`
-- **Mac / Linux:** run `./local/start-mac-linux.sh`
+- **Windows:** double-click `START-WINDOWS.bat`
+- **Mac / Linux:** run `./START-MAC-LINUX.sh`
 
 Open **http://localhost:3000/admin** and log in with the password `admin123`
 (change it right away in Settings, or start with your own: `ADMIN_PASSWORD=yourpassword`).
