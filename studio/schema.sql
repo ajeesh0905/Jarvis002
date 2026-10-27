@@ -120,11 +120,12 @@ CREATE TABLE IF NOT EXISTS outbox (
 CREATE TABLE IF NOT EXISTS month_targets (
   month TEXT PRIMARY KEY,
   reels INTEGER NOT NULL,
-  statics INTEGER NOT NULL
+  statics INTEGER NOT NULL,
+  carousels INTEGER
 );
 CREATE TABLE IF NOT EXISTS deliverables (
   month TEXT NOT NULL,
-  type TEXT NOT NULL CHECK (type IN ('reel','static')),
+  type TEXT NOT NULL CHECK (type IN ('reel','static','carousel')),
   slot INTEGER NOT NULL,
   done INTEGER NOT NULL DEFAULT 0,
   extra INTEGER NOT NULL DEFAULT 0,

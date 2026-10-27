@@ -21,6 +21,20 @@ const db = new DatabaseSync(path.join(DATA_DIR, 'studio.db'));
 db.exec('PRAGMA journal_mode = WAL');
 db.exec(fs.readFileSync(path.join(here, 'schema.sql'), 'utf8'));
 
+try { db.exec('ALTER TABLE month_targets ADD COLUMN carousels INTEGER'); } catch { /* already there */ }
+{ // older databases only allowed reel/static in deliverables; rebuild the table once so carousels can be stored
+  const def = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'deliverables'").get()?.sql || '';
+  if (def && !def.includes("'carousel'")) {
+    db.exec('BEGIN');
+    try {
+      db.exec('ALTER TABLE deliverables RENAME TO deliverables_old');
+      db.exec(fs.readFileSync(path.join(here, 'schema.sql'), 'utf8').match(/CREATE TABLE IF NOT EXISTS deliverables \([\s\S]*?\n\);/)[0]);
+      db.exec('INSERT INTO deliverables SELECT * FROM deliverables_old');
+      db.exec('DROP TABLE deliverables_old');
+      db.exec('COMMIT');
+    } catch (e) { db.exec('ROLLBACK'); throw e; }
+  }
+}
 for (const col of ["status TEXT NOT NULL DEFAULT 'requested'", "fee TEXT NOT NULL DEFAULT ''", "note TEXT NOT NULL DEFAULT ''"]) {
   try { db.exec('ALTER TABLE shoot_resources ADD COLUMN ' + col); } catch { /* already there */ }
 }
@@ -497,12 +511,14 @@ route('PUT', '/api/posts/(\\d+)', async (c) => {
 });
 route('DELETE', '/api/posts/(\\d+)', (c) => { need(c.u, 'admin', 'social'); run('DELETE FROM post_photos WHERE post_id = ?', +c.m[1]); run('DELETE FROM posts WHERE id = ?', +c.m[1]); return { ok: true }; });
 
-// monthly deliverables board (reels + statics for the client)
+// monthly deliverables board (reels + statics + carousels for the client)
 const isMonth = (v) => /^\d{4}-(0[1-9]|1[0-2])$/.test(v || '');
-const DEFAULT_TARGET = { reels: Number(process.env.DEFAULT_REELS) || 8, statics: Number(process.env.DEFAULT_STATICS) || 12 };
+const DEFAULT_TARGET = { reels: Number(process.env.DEFAULT_REELS) || 8, statics: Number(process.env.DEFAULT_STATICS) || 12, carousels: Number(process.env.DEFAULT_CAROUSELS) || 4 };
+const TKEY = { reel: 'reels', static: 'statics', carousel: 'carousels' };
 function targetFor(month) {
   // a month with no target set inherits the most recent earlier one
-  return q1('SELECT reels, statics FROM month_targets WHERE month <= ? ORDER BY month DESC LIMIT 1', month) || DEFAULT_TARGET;
+  const t = q1('SELECT reels, statics, carousels FROM month_targets WHERE month <= ? ORDER BY month DESC LIMIT 1', month);
+  return t ? { reels: t.reels, statics: t.statics, carousels: t.carousels ?? DEFAULT_TARGET.carousels } : DEFAULT_TARGET;
 }
 route('GET', '/api/board', (c) => {
   const month = c.url.searchParams.get('month') || today().slice(0, 7); if (!isMonth(month)) throw bad('Invalid month');
@@ -512,14 +528,15 @@ route('PUT', '/api/board/target', async (c) => {
   need(c.u, 'admin', 'social'); const b = await c.body();
   if (!isMonth(b.month)) throw bad('Invalid month');
   const n = (v) => { v = Math.floor(Number(v)); if (!(v >= 0 && v <= 100)) throw bad('Targets must be 0-100'); return v; };
-  run('INSERT OR REPLACE INTO month_targets VALUES (?,?,?)', b.month, n(b.reels), n(b.statics)); return { ok: true };
+  const cur = targetFor(b.month);
+  run('INSERT OR REPLACE INTO month_targets (month, reels, statics, carousels) VALUES (?,?,?,?)', b.month, n(b.reels ?? cur.reels), n(b.statics ?? cur.statics), n(b.carousels ?? cur.carousels)); return { ok: true };
 });
 route('PUT', '/api/board/slot', async (c) => {
   need(c.u, 'admin', 'social'); const b = await c.body();
   if (!isMonth(b.month)) throw bad('Invalid month');
-  const type = oneOf(b.type, ['reel', 'static'], 'type'), slot = Math.floor(Number(b.slot));
+  const type = oneOf(b.type, ['reel', 'static', 'carousel'], 'type'), slot = Math.floor(Number(b.slot));
   if (!(slot >= 1 && slot <= 150)) throw bad('Invalid slot');
-  const t = targetFor(b.month)[type === 'reel' ? 'reels' : 'statics'];
+  const t = targetFor(b.month)[TKEY[type]];
   const cur = q1('SELECT * FROM deliverables WHERE month = ? AND type = ? AND slot = ?', b.month, type, slot);
   const extra = slot > t ? 1 : 0;
   if (extra && !cur && !b.add) throw bad('Slot does not exist');
@@ -532,7 +549,7 @@ route('PUT', '/api/board/slot', async (c) => {
 route('DELETE', '/api/board/slot', (c) => {
   need(c.u, 'admin', 'social');
   const month = c.url.searchParams.get('month'), type = c.url.searchParams.get('type'), slot = +c.url.searchParams.get('slot');
-  if (!isMonth(month) || slot <= targetFor(month)[type === 'reel' ? 'reels' : 'statics']) throw bad('Only extra slots can be removed');
+  if (!isMonth(month) || slot <= (targetFor(month)[TKEY[type]] ?? 0)) throw bad('Only extra slots can be removed');
   run('DELETE FROM deliverables WHERE month = ? AND type = ? AND slot = ?', month, type, slot); return { ok: true };
 });
 
@@ -719,7 +736,7 @@ route('GET', '/api/day', (c) => {
     date, shoots,
     posts: q('SELECT * FROM posts WHERE post_date = ? ORDER BY post_time, id', date).map(postOut),
     photos_uploaded: q1('SELECT COUNT(*) n FROM photos WHERE created BETWEEN ? AND ?', a, b).n,
-    reels_done: done.find(r => r.type === 'reel')?.n || 0, statics_done: done.find(r => r.type === 'static')?.n || 0,
+    reels_done: done.find(r => r.type === 'reel')?.n || 0, statics_done: done.find(r => r.type === 'static')?.n || 0, carousels_done: done.find(r => r.type === 'carousel')?.n || 0,
   };
 });
 
@@ -734,11 +751,11 @@ route('GET', '/api/stats', (c) => {
   if (Date.parse(to) - Date.parse(from) > 400 * 864e5) throw bad('Range too long (max 400 days)');
   const [fa] = dayRange(from), [, tb] = dayRange(to);
   const rows = new Map();
-  const blank = () => ({ shoots: 0, shoots_done: 0, shoots_cancelled: 0, photos_uploaded: 0, photos_approved: 0, posts_planned: 0, posts_posted: 0, reels_done: 0, statics_done: 0 });
+  const blank = () => ({ shoots: 0, shoots_done: 0, shoots_cancelled: 0, photos_uploaded: 0, photos_approved: 0, posts_planned: 0, posts_posted: 0, reels_done: 0, statics_done: 0, carousels_done: 0 });
   for (let d = from; d <= to; d = addDays(d, 1)) { const k = bucketOf(d, g); if (!rows.has(k)) rows.set(k, blank()); }
   const at = (d) => rows.get(bucketOf(d, g));
   const people = new Map();
-  const person = (id) => { if (!people.has(id)) people.set(id, { photos_uploaded: 0, shoots_assigned: 0, shoots_going: 0, posts_created: 0, reels_done: 0, statics_done: 0 }); return people.get(id); };
+  const person = (id) => { if (!people.has(id)) people.set(id, { photos_uploaded: 0, shoots_assigned: 0, shoots_going: 0, posts_created: 0, reels_done: 0, statics_done: 0, carousels_done: 0 }); return people.get(id); };
 
   for (const s of q('SELECT id, shoot_date d, status FROM shoots WHERE shoot_date BETWEEN ? AND ?', from, to)) {
     const r = at(s.d); r.shoots++; if (s.status === 'done') r.shoots_done++; if (s.status === 'cancelled') r.shoots_cancelled++;
@@ -751,13 +768,13 @@ route('GET', '/api/stats', (c) => {
     const r = at(p.d); r.posts_planned++; if (p.status === 'posted') r.posts_posted++; if (p.created_by) person(p.created_by).posts_created++;
   }
   for (const x of q('SELECT type, done_at, done_by FROM deliverables WHERE done = 1 AND done_at BETWEEN ? AND ?', fa, tb)) {
-    const k = x.type === 'reel' ? 'reels_done' : 'statics_done'; at(istDay(x.done_at))[k]++; if (x.done_by) person(x.done_by)[k]++;
+    const k = { reel: 'reels_done', static: 'statics_done', carousel: 'carousels_done' }[x.type]; at(istDay(x.done_at))[k]++; if (x.done_by) person(x.done_by)[k]++;
   }
   const out = [...rows.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([period, v]) => ({ period, ...v }));
   const totals = blank(); for (const r of out) for (const k of Object.keys(totals)) totals[k] += r[k];
   const names = new Map(q('SELECT id, name, role FROM users').map(u => [u.id, u]));
   const by_person = [...people.entries()].map(([id, v]) => ({ name: names.get(id)?.name || 'Unknown', role: names.get(id)?.role || '', ...v }))
-    .sort((a, b) => (b.photos_uploaded + b.reels_done + b.statics_done + b.posts_created) - (a.photos_uploaded + a.reels_done + a.statics_done + a.posts_created));
+    .sort((a, b) => (b.photos_uploaded + b.reels_done + b.statics_done + b.carousels_done + b.posts_created) - (a.photos_uploaded + a.reels_done + a.statics_done + a.carousels_done + a.posts_created));
   return { group: g, from, to, rows: out, totals, by_person };
 });
 

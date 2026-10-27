@@ -316,7 +316,8 @@ async function directoryView(kind) {
     search, h('p', { class: 'mute' }, `${list.length} ${KIND_UI[kind].toLowerCase()}`), importPanel(kind, render), list.length ? list.map(card) : h('p', { class: 'mute' }, 'Nothing here yet — add one or import your sheet tab.'));
 }
 
-// ---------- board (monthly reels + statics for the client) ----------
+// ---------- board (monthly reels + statics + carousels for the client) ----------
+const TK = { reel: 'reels', static: 'statics', carousel: 'carousels' };
 const monthShift = (m, n) => { const d = new Date(m + '-01T00:00:00Z'); d.setUTCMonth(d.getUTCMonth() + n); return d.toISOString().slice(0, 7); };
 const monthLabel = (m) => new Date(m + '-01T00:00:00Z').toLocaleDateString(undefined, { month: 'long', year: 'numeric', timeZone: 'UTC' });
 async function boardView(month) {
@@ -324,7 +325,7 @@ async function boardView(month) {
   const d = await api('GET', '/api/board?month=' + month), edit = canPost();
   const slot = (type, n) => d.slots.find(x => x.type === type && x.slot === n);
   const open = (type, n) => {
-    const cur = slot(type, n) || { done: 0, tag: '', extra: n > d.target[type === 'reel' ? 'reels' : 'statics'] };
+    const cur = slot(type, n) || { done: 0, tag: '', extra: n > d.target[TK[type]] };
     const tag = h('input', { value: cur.tag, maxlength: 6, placeholder: 'tag (optional, e.g. N, R, V)' });
     const modal = h('div', { class: 'modal', onclick: (e) => e.target === modal && modal.remove() });
     const put = (body) => guard(async () => { await api('PUT', '/api/board/slot', { month, type, slot: n, ...body }); modal.remove(); render(); });
@@ -342,12 +343,20 @@ async function boardView(month) {
       h('div', { class: 'row', style: 'margin-top:8px;gap:6px' }, nums.map(n => { const x = slot(type, n); return h('button', { class: 'slot' + (x?.done ? ' done' : '') + (n > count ? ' extra' : ''), onclick: () => open(type, n) }, String(n), x?.tag && h('small', {}, x.tag)); }),
         edit && h('button', { class: 'slot add', title: 'Add extra', onclick: () => guard(async () => { await api('PUT', '/api/board/slot', { month, type, slot: Math.max(count, ...extras) + 1, add: true }); render(); }) }, '+')));
   };
-  const setTarget = () => { const r = prompt('Reels this month?', d.target.reels); if (r === null) return; const st = prompt('Statics this month?', d.target.statics); if (st === null) return; guard(async () => { await api('PUT', '/api/board/target', { month, reels: r, statics: st }); render(); }); };
-  const rd = d.slots.filter(x => x.type === 'reel' && x.done).length, sd = d.slots.filter(x => x.type === 'static' && x.done).length;
+  const setTarget = () => {
+    const inp = (v) => h('input', { type: 'number', min: 0, max: 100, value: v });
+    const f = { reels: inp(d.target.reels), statics: inp(d.target.statics), carousels: inp(d.target.carousels) };
+    const modal = h('div', { class: 'modal', onclick: (e) => e.target === modal && modal.remove() });
+    modal.append(h('div', { class: 'box', style: 'max-width:340px' }, h('h2', { style: 'margin-top:0' }, 'Targets for ' + monthLabel(month)), h('p', { class: 'mute' }, 'Later months use these numbers too, until you change them.'),
+      field('Reels', f.reels), field('Statics', f.statics), field('Carousels', f.carousels),
+      h('div', { class: 'row', style: 'margin-top:12px' }, h('button', { class: 'pri', onclick: () => guard(async () => { await api('PUT', '/api/board/target', { month, reels: f.reels.value, statics: f.statics.value, carousels: f.carousels.value }); modal.remove(); render(); }) }, 'Save'), h('button', { onclick: () => modal.remove() }, 'Cancel'))));
+    document.body.append(modal);
+  };
+  const nDone = (t) => d.slots.filter(x => x.type === t && x.done).length;
   return shell('#/board', h('div', { class: 'row spread' }, h('h1', {}, d.client + ' · Board'), edit && h('button', { onclick: setTarget }, 'Set targets')),
     h('div', { class: 'row spread' }, h('a', { class: 'btn', href: '#/board/' + monthShift(month, -1) }, '‹'), h('b', {}, monthLabel(month)), h('a', { class: 'btn', href: '#/board/' + monthShift(month, 1) }, '›')),
-    h('p', { class: 'mute' }, `Reels ${rd}/${d.target.reels} · Statics ${sd}/${d.target.statics}. Tap a number to mark it done.`),
-    line('reel', 'Reels', d.target.reels), line('static', 'Statics', d.target.statics));
+    h('p', { class: 'mute' }, `Reels ${nDone('reel')}/${d.target.reels} · Statics ${nDone('static')}/${d.target.statics} · Carousels ${nDone('carousel')}/${d.target.carousels}. Tap a number to mark it done.`),
+    line('reel', 'Reels', d.target.reels), line('static', 'Statics', d.target.statics), line('carousel', 'Carousels', d.target.carousels));
 }
 
 // ---------- day by day ----------
@@ -363,7 +372,7 @@ async function dayView(date) {
     s.plan.map(i => h('div', { style: 'font-size:.9rem' }, h('b', {}, (i.at_time || '—') + ' '), i.text)));
   const post = (p) => h('a', { href: '#/posts/' + p.id, class: 'card row spread', style: 'color:inherit' }, h('div', {}, h('b', {}, p.title), h('div', { class: 'mute' }, cap(p.platform), p.post_time && ' · ' + p.post_time, ' · 🖼 ' + p.photos.length)), badge(p.status));
   return shell('#/', h('div', { class: 'row spread' }, h('a', { class: 'btn', href: '#/day/' + dayShift(date, -1) }, '‹'), h('h1', { style: 'margin:0' }, fmtDate(date) + (date === today() ? ' · Today' : '')), h('a', { class: 'btn', href: '#/day/' + dayShift(date, 1) }, '›')),
-    h('div', { class: 'row', style: 'margin:10px 0' }, h('span', { class: 'badge' }, `📷 ${d.photos_uploaded} photos uploaded`), h('span', { class: 'badge' }, `🎬 ${d.reels_done} reels done`), h('span', { class: 'badge' }, `🖼 ${d.statics_done} statics done`)),
+    h('div', { class: 'row', style: 'margin:10px 0' }, h('span', { class: 'badge' }, `📷 ${d.photos_uploaded} photos uploaded`), h('span', { class: 'badge' }, `🎬 ${d.reels_done} reels done`), h('span', { class: 'badge' }, `🖼 ${d.statics_done} statics done`), h('span', { class: 'badge' }, `🎠 ${d.carousels_done} carousels done`)),
     h('h2', {}, 'Shoots'), d.shoots.length ? d.shoots.map(shoot) : h('p', { class: 'mute' }, 'No shoots.'), h('h2', {}, 'Posts'), d.posts.length ? d.posts.map(post) : h('p', { class: 'mute' }, 'No posts.'),
     canShoot() && h('p', {}, h('a', { class: 'btn', href: '#/shoots/new' }, '+ New shoot')), h('p', {}, h('a', { href: '#/' }, '← Home')));
 }
@@ -378,7 +387,7 @@ async function reportsView(group) {
   group = ['day', 'week', 'month'].includes(group) ? group : 'week';
   const r = await api('GET', '/api/stats?group=' + group);
   const label = (p) => group === 'month' ? monthLabel(p) : group === 'week' ? 'Week of ' + fmtDate(p) : fmtDate(p);
-  const cols = [['shoots', 'Shoots'], ['photos_uploaded', 'Photos'], ['photos_approved', 'Approved'], ['posts_planned', 'Posts'], ['posts_posted', 'Posted'], ['reels_done', 'Reels'], ['statics_done', 'Statics']];
+  const cols = [['shoots', 'Shoots'], ['photos_uploaded', 'Photos'], ['photos_approved', 'Approved'], ['posts_planned', 'Posts'], ['posts_posted', 'Posted'], ['reels_done', 'Reels'], ['statics_done', 'Statics'], ['carousels_done', 'Carousels']];
   const tbl = (head, rows) => h('div', { style: 'overflow-x:auto' }, h('table', {}, h('thead', {}, h('tr', {}, head.map(x => h('th', {}, x)))), h('tbody', {}, rows)));
   const csv = () => {
     const lines = [['Period', ...cols.map(c => c[1])].join(','), ...r.rows.map(x => [x.period, ...cols.map(c => x[c[0]])].join(','))];
@@ -386,10 +395,10 @@ async function reportsView(group) {
   };
   return shell('#/admin', h('a', { href: '#/admin' }, '← Admin'), h('h1', {}, 'Reports'),
     h('div', { class: 'row' }, ['day', 'week', 'month'].map(g => h('a', { class: 'btn' + (g === group ? ' pri' : ''), href: '#/reports/' + g }, { day: 'Daily', week: 'Weekly', month: 'Monthly' }[g]))),
-    h('p', { class: 'mute' }, `${r.from} → ${r.to}. Shoots/posts count by their planned date; photos by upload day; reels/statics by the day they were marked done.`),
+    h('p', { class: 'mute' }, `${r.from} → ${r.to}. Shoots/posts count by their planned date; photos by upload day; reels, statics and carousels by the day they were marked done.`),
     h('div', { class: 'row' }, cols.map(([k, l]) => h('div', { class: 'card grow', style: 'text-align:center;min-width:80px' }, h('div', { style: 'font-size:1.4rem;font-weight:700' }, r.totals[k]), h('div', { class: 'mute' }, l)))),
     tbl(['Period', ...cols.map(c => c[1])], r.rows.slice().reverse().map(x => h('tr', {}, h('td', {}, label(x.period)), cols.map(([k]) => h('td', { class: x[k] ? '' : 'mute' }, x[k]))))),
-    h('h2', {}, 'By person'), r.by_person.length ? tbl(['Name', 'Photos', 'Shoots assigned', 'Going', 'Posts', 'Reels', 'Statics'], r.by_person.map(p => h('tr', {}, h('td', {}, p.name), h('td', {}, p.photos_uploaded), h('td', {}, p.shoots_assigned), h('td', {}, p.shoots_going), h('td', {}, p.posts_created), h('td', {}, p.reels_done), h('td', {}, p.statics_done)))) : h('p', { class: 'mute' }, 'No activity in this range.'),
+    h('h2', {}, 'By person'), r.by_person.length ? tbl(['Name', 'Photos', 'Shoots assigned', 'Going', 'Posts', 'Reels', 'Statics', 'Carousels'], r.by_person.map(p => h('tr', {}, h('td', {}, p.name), h('td', {}, p.photos_uploaded), h('td', {}, p.shoots_assigned), h('td', {}, p.shoots_going), h('td', {}, p.posts_created), h('td', {}, p.reels_done), h('td', {}, p.statics_done), h('td', {}, p.carousels_done)))) : h('p', { class: 'mute' }, 'No activity in this range.'),
     h('p', {}, h('button', { onclick: csv }, '⬇ Download CSV')));
 }
 

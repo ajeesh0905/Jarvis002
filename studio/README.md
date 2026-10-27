@@ -31,11 +31,11 @@ First login: username `admin`, PIN = `ADMIN_PIN` (default `1234` — change it u
 
 ## Social media (Twin Birds)
 - **Content calendar**: posts with platform, date/time, caption, hashtags, approved photos, status (idea → draft → scheduled → posted). "Copy caption" button.
-- **Board**: monthly **Reels** and **Statics** slots like your Tech Board. Tap a number to mark it done (small tag optional), **+** adds an extra. Set the month's targets with *Set targets* (defaults 8 reels / 12 statics, or `DEFAULT_REELS` / `DEFAULT_STATICS`). The client name is `CLIENT_NAME` (default `Twin Birds`).
+- **Board**: monthly **Reels**, **Statics** and **Carousels** slots like your Tech Board. Tap a number to mark it done (small tag optional), **+** adds an extra. **Set targets** sets all three numbers for the month; later months reuse them until changed (defaults 8 reels / 12 statics / 4 carousels, or `DEFAULT_REELS` / `DEFAULT_STATICS` / `DEFAULT_CAROUSELS`). The client name is `CLIENT_NAME` (default `Twin Birds`).
 
 ## Day by day and reports
-- **Home → Day view**: pick any date — that day's shoots (plan, who is going, models), posts, and how many photos / reels / statics were done.
-- **Admin → Reports**: counts **daily, weekly (Mon–Sun) and monthly** — shoots, photos uploaded/approved, posts planned/posted, reels and statics done — plus a **per-person** table and CSV download.
+- **Home → Day view**: pick any date — that day's shoots (plan, who is going, models), posts, and how many photos / reels / statics / carousels were done.
+- **Admin → Reports**: counts **daily, weekly (Mon–Sun) and monthly** — shoots, photos uploaded/approved, posts planned/posted, reels, statics and carousels done — plus a **per-person** table and CSV download.
 
 ## Directory — load your "Shoot_Requirements" Google Sheet
 Open **Directory**, choose a tab (Studios, Resorts, Photographers, …), then **Import**: in Google Sheets open the matching tab → *File → Download → CSV* and choose the file. Columns are matched by their headings, flexibly (Name / Model Name, Phone / Mobile / WhatsApp / Contact, Instagram / Portfolio / Website, City / Location, Charges, Rating, …); anything else goes into Notes, serial-number columns are ignored, and after importing the app lists how each column was read. Re-importing is safe: names already there are kept and only empty fields are filled. "DM" contacts have no phone, so the card shows the Instagram link instead. Phone numbers without a country code get `+91` (`DEFAULT_COUNTRY_CODE` to change).
@@ -58,7 +58,7 @@ Every attempt is listed under **Messages sent** on the shoot (✓ sent / skipped
 See `GOOGLE-DRIVE.md`. Without it, photos are stored on the server's disk under `data/photos`.
 
 ## Settings (environment variables)
-`PORT` (3100) · `DATA_DIR` (./data — **back this up**) · `ADMIN_PIN` · `CLIENT_NAME` · `DEFAULT_REELS` / `DEFAULT_STATICS` · `DEFAULT_COUNTRY_CODE` · `WHATSAPP_TOKEN` / `WHATSAPP_PHONE_ID` / `WHATSAPP_TEMPLATE` / `WHATSAPP_TEMPLATE_LANG` · `NOTIFY_WEBHOOK_URL` · `GDRIVE_CLIENT_ID` / `GDRIVE_CLIENT_SECRET` / `GDRIVE_REFRESH_TOKEN`
+`PORT` (3100) · `DATA_DIR` (./data — **back this up**) · `ADMIN_PIN` · `CLIENT_NAME` · `DEFAULT_REELS` / `DEFAULT_STATICS` / `DEFAULT_CAROUSELS` · `DEFAULT_COUNTRY_CODE` · `WHATSAPP_TOKEN` / `WHATSAPP_PHONE_ID` / `WHATSAPP_TEMPLATE` / `WHATSAPP_TEMPLATE_LANG` · `NOTIFY_WEBHOOK_URL` · `GDRIVE_CLIENT_ID` / `GDRIVE_CLIENT_SECRET` / `GDRIVE_REFRESH_TOKEN`
 
 ## Security notes
 Logins use usernames + PINs (hashed), 5 wrong tries locks that user/device for 10 minutes. Put the app behind HTTPS (e.g. Cloudflare Tunnel or a reverse proxy) before using it over the internet. Photos are only served to logged-in users.
