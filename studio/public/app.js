@@ -388,7 +388,7 @@ async function openPhoto(p, done) {
       h('div', { class: 'row spread', style: 'margin:8px 0' }, h('span', { class: 'mute' }, p.name), badge(cur)),
       h('div', { class: 'row' }, acts, h('a', { class: 'btn', href: `/files/${p.id}?download=1` }, '⬇ Download'),
         (me.role === 'admin' || me.role === 'photographer') && h('button', { class: 'bad', onclick: () => confirm('Delete this photo?') && guard(async () => { await api('DELETE', '/api/photos/' + p.id); close(); }) }, 'Delete')),
-      h('h2', {}, 'Comments'), cm.length ? cm.map(c => h('div', { class: 'cmt' }, h('b', {}, c.name), ' ', h('span', { class: 'mute' }, new Date(c.created).toLocaleString()), h('div', {}, c.text))) : h('p', { class: 'mute' }, 'No comments.'),
+      h('h2', {}, 'Comments'), h('div', {}, cm.length ? cm.map(c => h('div', { class: 'cmt' }, h('b', {}, c.name), ' ', h('span', { class: 'mute' }, new Date(c.created).toLocaleString()), h('div', {}, c.text))) : h('p', { class: 'mute' }, 'No comments.')),
       h('div', { class: 'row', style: 'margin-top:8px' }, h('div', { class: 'grow' }, txt), h('button', { onclick: send }, 'Send')),
       h('p', {}, h('button', { onclick: close }, 'Close')));
   };
