@@ -188,7 +188,12 @@ async function shootView(id) {
     h('div', { class: 'row spread' }, h('h1', {}, s.title), mine && h('a', { class: 'btn', href: '#/shoots/' + id + '/edit' }, 'Edit')),
     h('div', { class: 'card' }, h('div', { class: 'row spread' }, h('div', {}, h('b', {}, h('a', { href: '#/day/' + s.shoot_date }, fmtDate(s.shoot_date)), s.start_time && ' · ' + s.start_time), h('div', { class: 'mute' }, [s.location && '📍 ' + s.location, s.client].filter(Boolean).join(' · '), ' ', s.location_link && safeLink(s.location_link) && h('a', { href: s.location_link, target: '_blank', rel: 'noopener noreferrer' }, 'Open map'))), statusSel),
       s.notes ? h('p', { style: 'white-space:pre-wrap' }, s.notes) : null),
-    rsvp, s.resources.length ? [h('h2', {}, 'Booked crew'), h('div', { class: 'card' }, s.resources.map(r => h('div', { style: 'padding:5px 0' }, h('div', { class: 'row spread' }, h('span', {}, h('b', {}, r.name), ' ', h('span', { class: 'mute' }, KIND_ONE[r.kind] + (r.charge ? ' · ₹ ' + r.charge : ''))), h('div', { class: 'row' }, contactLinks(r, `Hi ${r.name}, ${shootText(s)}`))))))] : null,
+    rsvp, s.resources.length ? [h('h2', {}, 'Booked crew'), h('div', { class: 'card' }, s.resources.map(r => {
+      const place = r.kind === 'studio' || r.kind === 'resort';
+      const st = h('select', { disabled: !mine || place, onchange: (e) => guard(async () => { await api('PUT', `/api/shoots/${id}/resources/${r.id}`, { status: e.target.value }); reload(); }) }, Object.entries(BOOK_STATUS).map(([v, l]) => h('option', { value: v, selected: v === r.status }, l)));
+      return h('div', { style: 'padding:6px 0;border-top:1px solid var(--line)' }, h('div', { class: 'row spread' }, h('span', {}, h('b', {}, r.name), ' ', h('span', { class: 'mute' }, KIND_ONE[r.kind] + (r.fee ? ' · ₹ ' + r.fee : r.charge ? ' · listed ' + r.charge : ''))), !place && st),
+        r.note ? h('div', { class: 'mute' }, r.note) : null, h('div', { class: 'row', style: 'margin-top:4px' }, contactLinks(r, `Hi ${r.name}, ${shootText(s)}`)));
+    }))] : null,
     h('h2', {}, 'Who is going'), people, h('h2', {}, 'Models'), models, h('h2', {}, 'Day plan'), plan,
     h('h2', {}, `Shot list (${s.shots.filter(t => t.done).length}/${s.shots.length})`), h('div', { class: 'card' }, shotsBox,
       mine && h('div', { class: 'row' }, h('div', { class: 'grow' }, newShot), h('button', { onclick: () => newShot.value.trim() && guard(async () => { await api('POST', `/api/shoots/${id}/shots`, { text: newShot.value }); reload(); }) }, 'Add'))),
@@ -236,15 +241,35 @@ function importPanel(kind, done) {
   return h('details', { class: 'card' }, h('summary', {}, `⬆ Import ${KIND_UI[kind]} from Google Sheet`),
     h('p', { class: 'mute' }, `In your Google Sheet open the "${KIND_UI[kind]}" tab → File → Download → Comma-separated values (.csv), then choose that file here. Existing names are kept and only their empty fields are filled.`), file, h('div', { style: 'margin-top:8px' }, h('button', { class: 'pri', onclick: go }, 'Import')), status);
 }
+const BOOK_STATUS = { requested: '⏳ Requested', confirmed: '✅ Confirmed', declined: '❌ Declined' };
+async function bookModal(r, done) {
+  const shoots = (await api('GET', '/api/shoots')).filter(s => s.shoot_date >= today() && s.status !== 'cancelled' && s.status !== 'done').reverse();
+  const modal = h('div', { class: 'modal', onclick: (e) => e.target === modal && modal.remove() });
+  const sel = h('select', {}, shoots.map(s => h('option', { value: s.id }, fmtDate(s.shoot_date) + ' · ' + s.title + (s.start_time ? ' · ' + s.start_time : ''))));
+  const fee = h('input', { placeholder: r.charge ? 'Listed: ' + r.charge : 'e.g. 5000/day' }), note = h('input', { placeholder: 'e.g. bring 85mm lens, arrive 8:30' });
+  const warn = h('div', { class: 'err' });
+  const check = () => { const s = shoots.find(x => x.id === +sel.value); const clash = s && (r.upcoming || []).find(u => u.shoot_date === s.shoot_date); warn.textContent = clash ? `⚠ ${r.name} is already booked that day: ${clash.title} (${BOOK_STATUS[clash.status]})` : ''; };
+  sel.addEventListener('change', check); check();
+  const go = () => guard(async () => {
+    const res = await api('POST', `/api/shoots/${sel.value}/book`, { resource_id: r.id, fee: fee.value, note: note.value });
+    modal.remove(); toast(res.messaged ? (me.auto_messages ? 'Booked — message sent' : 'Booked — message queued (auto-send not set up)') : 'Booked — no phone number, contact them on Instagram / email'); done();
+  });
+  modal.append(h('div', { class: 'box', style: 'max-width:420px' }, h('h2', { style: 'margin-top:0' }, 'Book ' + r.name), h('div', { class: 'mute' }, KIND_ONE[r.kind] + (r.city ? ' · ' + r.city : '')),
+    shoots.length ? [field('Which shoot?', sel), warn, field('Agreed fee (optional)', fee), field('Note for them (optional)', note),
+      h('div', { class: 'row', style: 'margin-top:12px' }, h('button', { class: 'pri', onclick: go }, r.phone ? 'Book & send message' : 'Book'), h('button', { onclick: () => modal.remove() }, 'Cancel'))]
+      : [h('p', {}, 'No upcoming shoots to book on. Create a shoot first.'), h('a', { class: 'btn pri', href: '#/shoots/new', onclick: () => modal.remove() }, '+ New shoot')]));
+  document.body.append(modal);
+}
 async function directoryView(kind) {
   if (!canShoot()) return shell('#/directory', h('p', {}, 'Not available for your role.'));
   kind = KIND_UI[kind] ? kind : 'photographer';
   const q = sessionStorage.getItem('dq') || '';
   const list = await api('GET', `/api/resources?kind=${kind}&q=${encodeURIComponent(q)}`);
   const search = h('input', { type: 'search', placeholder: 'Search name, city, category…', value: q, onchange: (e) => { sessionStorage.setItem('dq', e.target.value); render(); } });
-  const card = (r) => h('div', { class: 'card' }, h('div', { class: 'row spread' }, h('b', {}, r.name), h('button', { onclick: () => resForm(r, kind, render) }, 'Edit')),
+  const card = (r) => h('div', { class: 'card' }, h('div', { class: 'row spread' }, h('b', {}, r.name), h('div', { class: 'row' }, kind !== 'studio' && kind !== 'resort' && h('button', { class: 'pri', onclick: () => bookModal(r, render) }, 'Book'), h('button', { onclick: () => resForm(r, kind, render) }, 'Edit'))),
     h('div', { class: 'mute' }, [r.city, r.category, r.style, r.rating && '⭐ ' + r.rating, r.charge && '₹ ' + r.charge, r.distance].filter(Boolean).join(' · ')),
     r.phone || r.email ? h('div', { class: 'mute' }, [r.phone, r.email].filter(Boolean).join(' · ')) : (r.link ? h('div', { class: 'mute' }, 'Contact via Instagram DM') : null),
+    r.upcoming?.length ? h('div', { style: 'font-size:.9rem;margin-top:4px' }, r.upcoming.map(u => h('div', {}, '📅 ', h('a', { href: '#/shoots/' + u.shoot_id }, fmtDate(u.shoot_date) + ' · ' + u.title), ' ', h('span', { class: 'mute' }, BOOK_STATUS[u.status])))) : null,
     r.notes ? h('div', { class: 'mute', style: 'white-space:pre-wrap' }, r.notes) : null, h('div', { class: 'row', style: 'margin-top:6px' }, contactLinks(r)));
   return shell('#/directory', h('div', { class: 'row spread' }, h('h1', {}, 'Directory'), h('button', { class: 'pri', onclick: () => resForm({}, kind, render) }, '+ Add')),
     h('div', { class: 'row', style: 'gap:6px;margin-bottom:8px' }, Object.entries(KIND_UI).map(([k, l]) => h('a', { class: 'btn' + (k === kind ? ' pri' : ''), href: '#/directory/' + k }, l))),

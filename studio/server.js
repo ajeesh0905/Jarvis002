@@ -21,6 +21,9 @@ const db = new DatabaseSync(path.join(DATA_DIR, 'studio.db'));
 db.exec('PRAGMA journal_mode = WAL');
 db.exec(fs.readFileSync(path.join(here, 'schema.sql'), 'utf8'));
 
+for (const col of ["status TEXT NOT NULL DEFAULT 'requested'", "fee TEXT NOT NULL DEFAULT ''", "note TEXT NOT NULL DEFAULT ''"]) {
+  try { db.exec('ALTER TABLE shoot_resources ADD COLUMN ' + col); } catch { /* already there */ }
+}
 const q = (sql, ...p) => db.prepare(sql).all(...p);
 const q1 = (sql, ...p) => db.prepare(sql).get(...p);
 const run = (sql, ...p) => db.prepare(sql).run(...p);
@@ -100,13 +103,14 @@ const cleanUrl = (v) => { v = str(v, 300); if (!v) return ''; if (!/^https?:\/\/
 const cleanPhone = (v) => { v = str(v, 30).replace(/[\s()-]/g, ''); if (v && !/^\+?\d{7,15}$/.test(v)) throw bad('Phone number looks wrong: ' + v); return v; };
 // directory people/places booked on a shoot; returns newly booked resource rows
 function setResources(shootId, ids) {
-  const prev = new Set(q('SELECT resource_id FROM shoot_resources WHERE shoot_id = ?', shootId).map(r => r.resource_id));
+  const prev = new Map(q('SELECT * FROM shoot_resources WHERE shoot_id = ?', shootId).map(r => [r.resource_id, r]));
   run('DELETE FROM shoot_resources WHERE shoot_id = ?', shootId);
   const added = [];
   for (const id of [...new Set(ids.map(Number))].slice(0, 100)) {
     const r = q1('SELECT id, kind, name, phone FROM resources WHERE id = ?', id); if (!r) continue;
-    run('INSERT INTO shoot_resources VALUES (?,?)', shootId, id);
-    if (!prev.has(id)) added.push(r);
+    const old = prev.get(id);
+    run('INSERT INTO shoot_resources (shoot_id, resource_id, status, fee, note) VALUES (?,?,?,?,?)', shootId, id, old?.status || 'requested', old?.fee || '', old?.note || '');
+    if (!old) added.push(r);
   }
   return added;
 }
@@ -189,7 +193,7 @@ function tell(shootId, { userIds = [], models = [], resources = [], kind, skipUs
     }
     for (const r of resources) {
       if (r.kind === 'studio' || r.kind === 'resort') continue; // places are not messaged
-      const text = `Hi ${r.name}, ${kind === 'booked' ? `you're booked as ${KIND_LABEL[r.kind] || 'crew'} for a shoot` : head[kind]}:\n${shootLines(s)}`;
+      const text = `Hi ${r.name}, ${kind === 'booked' ? `you're booked as ${KIND_LABEL[r.kind] || 'crew'} for a shoot` : head[kind]}:\n${shootLines(s)}${r.fee ? '\nAgreed fee: ' + r.fee : ''}${r.note ? '\nNote: ' + r.note : ''}${kind === 'booked' ? '\nPlease reply to confirm.' : ''}`;
       jobs.push(deliver({ shootId, name: r.name, phone: r.phone, text }));
     }
     Promise.allSettled(jobs).then(r => r.forEach(x => x.status === 'rejected' && console.error('deliver failed', x.reason)));
@@ -292,7 +296,7 @@ route('GET', '/api/shoots/(\\d+)', (c) => {
   s.shots = q('SELECT id, text, done FROM shots WHERE shoot_id = ? ORDER BY id', s.id);
   s.models = q('SELECT id, name, phone, portfolio, note FROM shoot_models WHERE shoot_id = ? ORDER BY id', s.id);
   if (!(c.u.role === 'admin' || c.u.role === 'photographer')) for (const m of s.models) m.phone = '';
-  s.resources = q('SELECT r.id, r.kind, r.name, r.city, r.phone, r.link, r.maps, r.category, r.charge FROM shoot_resources sr JOIN resources r ON r.id = sr.resource_id WHERE sr.shoot_id = ? ORDER BY r.kind, r.name', s.id);
+  s.resources = q('SELECT r.id, r.kind, r.name, r.city, r.phone, r.link, r.maps, r.category, r.charge, sr.status, sr.fee, sr.note FROM shoot_resources sr JOIN resources r ON r.id = sr.resource_id WHERE sr.shoot_id = ? ORDER BY r.kind, r.name', s.id);
   if (!(c.u.role === 'admin' || c.u.role === 'photographer')) for (const r of s.resources) r.phone = '';
   s.messages = (c.u.role === 'admin' || c.u.role === 'photographer') ? q('SELECT id, to_name, status, error, created FROM outbox WHERE shoot_id = ? ORDER BY id DESC LIMIT 30', s.id) : [];
   s.plan = q('SELECT id, at_time, text FROM shoot_plan WHERE shoot_id = ? ORDER BY id', s.id);
@@ -581,7 +585,32 @@ function resInput(b, cur = {}) {
 route('GET', '/api/resources', (c) => {
   need(c.u, 'admin', 'photographer');
   const kind = c.url.searchParams.get('kind'), qs = '%' + str(c.url.searchParams.get('q'), 60).toLowerCase() + '%';
-  return q(`SELECT * FROM resources WHERE (? IS NULL OR kind = ?) AND (lower(name) LIKE ? OR lower(city) LIKE ? OR lower(category) LIKE ?) ORDER BY name LIMIT 1000`, kind, kind, qs, qs, qs);
+  const rows = q(`SELECT * FROM resources WHERE (? IS NULL OR kind = ?) AND (lower(name) LIKE ? OR lower(city) LIKE ? OR lower(category) LIKE ?) ORDER BY name LIMIT 1000`, kind, kind, qs, qs, qs);
+  const up = new Map();
+  for (const b of q(`SELECT sr.resource_id rid, s.id shoot_id, s.title, s.shoot_date, sr.status FROM shoot_resources sr JOIN shoots s ON s.id = sr.shoot_id WHERE s.shoot_date >= ? AND s.status != 'cancelled' AND sr.status != 'declined' ORDER BY s.shoot_date`, today())) {
+    if (!up.has(b.rid)) up.set(b.rid, []); up.get(b.rid).push(b);
+  }
+  for (const r of rows) r.upcoming = (up.get(r.id) || []).slice(0, 5);
+  return rows;
+});
+// book one person from the directory onto a shoot (sends the message), warns about same-day clashes
+route('POST', '/api/shoots/(\\d+)/book', async (c) => {
+  need(c.u, 'admin', 'photographer'); const b = await c.body(); const id = +c.m[1];
+  const s = q1('SELECT * FROM shoots WHERE id = ?', id); if (!s) throw new HttpError(404, 'No such shoot');
+  if (s.status === 'cancelled') throw bad('This shoot is cancelled');
+  const r = q1('SELECT id, kind, name, phone FROM resources WHERE id = ?', +b.resource_id); if (!r) throw new HttpError(404, 'Not in the directory');
+  if (q1('SELECT 1 x FROM shoot_resources WHERE shoot_id = ? AND resource_id = ?', id, r.id)) throw bad(r.name + ' is already booked on this shoot');
+  const fee = str(b.fee, 60), note = str(b.note, 300);
+  const conflicts = q(`SELECT s2.id, s2.title FROM shoot_resources sr JOIN shoots s2 ON s2.id = sr.shoot_id WHERE sr.resource_id = ? AND s2.shoot_date = ? AND s2.status != 'cancelled' AND sr.status != 'declined'`, r.id, s.shoot_date);
+  run('INSERT INTO shoot_resources (shoot_id, resource_id, status, fee, note) VALUES (?,?,?,?,?)', id, r.id, 'requested', fee, note);
+  if (r.kind !== 'studio' && r.kind !== 'resort') tell(id, { resources: [{ ...r, fee, note }], kind: 'booked' });
+  return { ok: true, conflicts, messaged: !!r.phone };
+});
+route('PUT', '/api/shoots/(\\d+)/resources/(\\d+)', async (c) => {
+  need(c.u, 'admin', 'photographer'); const b = await c.body();
+  const cur = q1('SELECT * FROM shoot_resources WHERE shoot_id = ? AND resource_id = ?', +c.m[1], +c.m[2]); if (!cur) throw new HttpError(404, 'Not booked');
+  run('UPDATE shoot_resources SET status = ?, fee = ?, note = ? WHERE shoot_id = ? AND resource_id = ?', oneOf(b.status ?? cur.status, ['requested', 'confirmed', 'declined'], 'status'), b.fee === undefined ? cur.fee : str(b.fee, 60), b.note === undefined ? cur.note : str(b.note, 300), +c.m[1], +c.m[2]);
+  return { ok: true };
 });
 route('POST', '/api/resources', async (c) => {
   need(c.u, 'admin', 'photographer'); const r = resInput(await c.body());

@@ -39,6 +39,12 @@ First login: username `admin`, PIN = `ADMIN_PIN` (default `1234` — change it u
 Open **Directory**, choose a tab (Studios, Resorts, Photographers, …), then **Import**: in Google Sheets open the matching tab → *File → Download → CSV* and choose the file. Columns are matched by their headings (Name, Location/CITY, Phone Number/Number/Contact, Instagram, Charges, Rating, …); anything else goes into Notes. Re-importing is safe: names already there are kept and only empty fields are filled. "DM" contacts have no phone, so the card shows the Instagram link instead. Phone numbers without a country code get `+91` (`DEFAULT_COUNTRY_CODE` to change).
 > Phone numbers stay in your app's database only — they are not stored in the code repository.
 
+## Booking from the photographer list
+**Directory → Photographers** (or any list) → **Book** on a person's card:
+1. choose the upcoming shoot, optionally add the **agreed fee** and a **note** for them;
+2. the app warns if they are **already booked that day**, and sends them the booking message (if they have a phone number — otherwise it tells you to contact them on Instagram / email);
+3. each card shows that person's **upcoming bookings**, and on the shoot page you set their status: ⏳ Requested → ✅ Confirmed / ❌ Declined (declined people free up that day).
+
 ## Automatic messages when someone is booked
 When a team member, directory person or model is **newly booked** on a shoot, or a shoot's **date / time / place changes or is cancelled**, the app:
 1. shows team members an in-app message (Home → Messages), and

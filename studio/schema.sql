@@ -154,5 +154,8 @@ CREATE INDEX IF NOT EXISTS idx_resources_kind ON resources(kind);
 CREATE TABLE IF NOT EXISTS shoot_resources (
   shoot_id INTEGER NOT NULL,
   resource_id INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'requested' CHECK (status IN ('requested','confirmed','declined')),
+  fee TEXT NOT NULL DEFAULT '',
+  note TEXT NOT NULL DEFAULT '',
   PRIMARY KEY (shoot_id, resource_id)
 );
