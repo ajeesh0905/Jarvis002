@@ -21,7 +21,7 @@ First login: username `admin`, PIN = `ADMIN_PIN` (default `1234` — change it u
 ## Photo shoot team
 - **Shoot**: title, client, **date, time, place** (pick a studio/resort from the Directory or type one, plus map link), notes.
 - **Who is going**: pick team members; each answers ✅ Going / ❌ Can't go in the app.
-- **Booked crew**: book photographers, makeup artists, art directors, costume designers, props and models from the **Directory**.
+- **Booked crew**: book photographers, makeup artists, art directors, costume designers, props and models from the **Directory**. In the shoot form the list shows who is **already booked on the shoot date** (hidden by default; untick *Only people free on the shoot date* to see everyone).
 - **Models**: one-off models can be typed in as `Name | phone | portfolio link | note` (a **portfolio link** button is shown). Regular models can live in the Directory.
 - **Day plan**: timeline, e.g. `08:30 Setup & lights`. **Shot list** with tick boxes.
 - **Suggestions & feedback**: anyone on the team can post on a shoot.
@@ -45,18 +45,18 @@ Open **Directory**, choose a tab (Studios, Resorts, Photographers, …), then **
 2. the app warns if they are **already booked that day**, and sends them the booking message (if they have a phone number — otherwise it tells you to contact them on Instagram / email);
 3. each card shows that person's **upcoming bookings**, and on the shoot page you set their status: ⏳ Requested → ✅ Confirmed / ❌ Declined (declined people free up that day).
 
-## Automatic messages when someone is booked
+## Automatic WhatsApp messages
 When a team member, directory person or model is **newly booked** on a shoot, or a shoot's **date / time / place changes or is cancelled**, the app:
 1. shows team members an in-app message (Home → Messages), and
-2. sends a message to anyone with a phone number via `NOTIFY_WEBHOOK_URL` — the app POSTs `{"to": "+91…", "name": "…", "message": "…"}` to that URL. Point it at your WhatsApp/SMS provider, or a Make/Zapier webhook that sends the message.
+2. sends a **WhatsApp message** to anyone with a phone number — directly through the WhatsApp Business Cloud API. Setup (Meta account, token, template): **`WHATSAPP.md`**.
 
-Every attempt is listed under **Messages sent** on the shoot (✓ sent / skipped / failed and why). Without `NOTIFY_WEBHOOK_URL` messages are marked *skipped*; the shoot page still has one-tap **WhatsApp** buttons that open a ready-written message.
+Every attempt is listed under **Messages sent** on the shoot (✓ sent / skipped / failed and why). Until WhatsApp is connected messages are marked *skipped*; the shoot page still has one-tap **WhatsApp** buttons that open a ready-written message in your own WhatsApp. (`NOTIFY_WEBHOOK_URL` can hand messages to another sender instead: the app POSTs `{"to","name","message"}` to it.)
 
 ## Photo storage → Google Drive
 See `GOOGLE-DRIVE.md`. Without it, photos are stored on the server's disk under `data/photos`.
 
 ## Settings (environment variables)
-`PORT` (3100) · `DATA_DIR` (./data — **back this up**) · `ADMIN_PIN` · `CLIENT_NAME` · `DEFAULT_REELS` / `DEFAULT_STATICS` · `DEFAULT_COUNTRY_CODE` · `NOTIFY_WEBHOOK_URL` · `GDRIVE_CLIENT_ID` / `GDRIVE_CLIENT_SECRET` / `GDRIVE_REFRESH_TOKEN`
+`PORT` (3100) · `DATA_DIR` (./data — **back this up**) · `ADMIN_PIN` · `CLIENT_NAME` · `DEFAULT_REELS` / `DEFAULT_STATICS` · `DEFAULT_COUNTRY_CODE` · `WHATSAPP_TOKEN` / `WHATSAPP_PHONE_ID` / `WHATSAPP_TEMPLATE` / `WHATSAPP_TEMPLATE_LANG` · `NOTIFY_WEBHOOK_URL` · `GDRIVE_CLIENT_ID` / `GDRIVE_CLIENT_SECRET` / `GDRIVE_REFRESH_TOKEN`
 
 ## Security notes
 Logins use usernames + PINs (hashed), 5 wrong tries locks that user/device for 10 minutes. Put the app behind HTTPS (e.g. Cloudflare Tunnel or a reverse proxy) before using it over the internet. Photos are only served to logged-in users.

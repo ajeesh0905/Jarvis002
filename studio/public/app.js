@@ -109,7 +109,8 @@ const shootText = (s) => `📷 ${s.title}\n📅 ${s.shoot_date}${s.start_time ? 
 const safeHref = (u) => /^https?:\/\//i.test(u) ? u : '#';
 
 async function shootForm(existing) {
-  const dir = await api('GET', '/api/resources').catch(() => []);
+  const exId = existing?.id || 0, dirFor = (d) => api('GET', `/api/resources?date=${d}&exclude=${exId}`).catch(() => []);
+  const dir = await dirFor(existing?.shoot_date || today());
   const s = existing || { title: '', client: me.client, shoot_date: today(), start_time: '', location: '', notes: '', status: 'planned', location_link: '', members: [], models: [], plan: [], resources: [] };
   const f = {
     title: h('input', { value: s.title, maxlength: 120 }), client: h('input', { value: s.client }), date: h('input', { type: 'date', value: s.shoot_date }),
@@ -125,10 +126,24 @@ async function shootForm(existing) {
   const placeSel = h('select', { onchange: (e) => { const r = places.find(p => p.id === +e.target.value); if (r) { f.loc.value = r.name + (r.city ? ', ' + r.city : ''); f.locLink.value = r.maps || ''; } } },
     h('option', { value: '' }, '— pick a studio / resort, or type below —'), ['studio', 'resort'].map(k => h('optgroup', { label: KIND_UI[k] }, places.filter(p => p.kind === k).map(p => h('option', { value: p.id }, p.name + (p.city ? ' · ' + p.city : '') + (p.distance ? ' · ' + p.distance : ''))))));
   const resIds = new Set((s.resources || []).map(r => r.id));
-  const people = dir.filter(r => r.kind !== 'studio' && r.kind !== 'resort');
-  const rsearch = h('input', { type: 'search', placeholder: 'Search the directory…', oninput: (e) => { const t = e.target.value.toLowerCase(); rlist.querySelectorAll('label.chk').forEach(l => l.style.display = l.textContent.toLowerCase().includes(t) ? '' : 'none'); } });
-  const rlist = h('div', { style: 'max-height:260px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:4px 8px' }, Object.keys(KIND_UI).filter(k => k !== 'studio' && k !== 'resort').map(k => { const g = people.filter(r => r.kind === k); return g.length ? [h('div', { class: 'mute', style: 'margin-top:6px;font-weight:600' }, KIND_UI[k]),
-    g.map(r => h('label', { class: 'chk', style: 'margin:0' }, h('input', { type: 'checkbox', checked: resIds.has(r.id), onchange: (e) => e.target.checked ? resIds.add(r.id) : resIds.delete(r.id) }), r.name + (r.city ? ' · ' + r.city : '') + (r.phone ? '' : ' (no phone)')))] : null; }));
+  let people = dir.filter(r => r.kind !== 'studio' && r.kind !== 'resort');
+  let textFilter = '';
+  const freeOnly = h('input', { type: 'checkbox', checked: true, onchange: () => drawList() });
+  const rlist = h('div', { style: 'max-height:260px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:4px 8px' });
+  const drawList = () => {
+    const kinds = Object.keys(KIND_UI).filter(k => k !== 'studio' && k !== 'resort');
+    const visible = (r) => resIds.has(r.id) || ((!freeOnly.checked || !(r.busy || []).length) && (!textFilter || (r.name + ' ' + r.city + ' ' + r.category).toLowerCase().includes(textFilter)));
+    const busyCount = people.filter(r => (r.busy || []).length && !resIds.has(r.id)).length;
+    freeNote.textContent = busyCount ? `${busyCount} already booked on this date` : '';
+    rlist.replaceChildren(...kinds.map(k => { const g = people.filter(r => r.kind === k && visible(r)); return g.length ? [h('div', { class: 'mute', style: 'margin-top:6px;font-weight:600' }, KIND_UI[k]),
+      g.map(r => h('label', { class: 'chk', style: 'margin:0' }, h('input', { type: 'checkbox', checked: resIds.has(r.id), onchange: (e) => e.target.checked ? resIds.add(r.id) : resIds.delete(r.id) }),
+        r.name + (r.city ? ' · ' + r.city : '') + (r.phone ? '' : ' (no phone)') + ((r.busy || []).length ? ' ⚠ busy: ' + r.busy[0].title : '')))] : null; }).flat(Infinity).filter(Boolean));
+    if (!rlist.children.length) rlist.append(h('p', { class: 'mute' }, 'Nobody to show' + (freeOnly.checked && busyCount ? ' — untick "only free people" to see everyone.' : '.')));
+  };
+  const freeNote = h('span', { class: 'mute' });
+  const rsearch = h('input', { type: 'search', placeholder: 'Search the directory…', oninput: (e) => { textFilter = e.target.value.toLowerCase(); drawList(); } });
+  f.date.addEventListener('change', async () => { if (!f.date.value) return; const d = await dirFor(f.date.value); people = d.filter(r => r.kind !== 'studio' && r.kind !== 'resort'); drawList(); });
+  drawList();
   const memberIds = new Set(s.members.map(m => m.id));
   const crew = users.filter(u => u.role !== 'social' || memberIds.has(u.id) || true).map(u => h('label', { class: 'chk' }, h('input', { type: 'checkbox', checked: memberIds.has(u.id), onchange: (e) => e.target.checked ? memberIds.add(u.id) : memberIds.delete(u.id) }), u.name + ' (' + ROLE_LABEL[u.role] + ')'));
   const parseModels = () => f.models.value.split('\n').map(l => l.trim()).filter(Boolean).map(l => { const [name, phone, portfolio, ...note] = l.split('|').map(x => x.trim()); return { name, phone, portfolio, note: note.join(' | ') }; });
@@ -140,9 +155,9 @@ async function shootForm(existing) {
   });
   return shell('#/shoots', h('h1', {}, existing ? 'Edit shoot' : 'New shoot'), h('div', { class: 'card' },
     field('Title', f.title), field('Client / brand', f.client), h('div', { class: 'grid2' }, field('Date', f.date), field('Start time', f.time)),
-    places.length ? field('Place from directory', placeSel) : null, field('Place', f.loc), field('Map link', f.locLink), field('Notes (look, props, contact)', f.notes), field('Models (name | phone | portfolio link | note)', f.models), field('Day plan (time + step)', f.plan), dir.length ? [h('label', {}, 'Book from directory (photographers, makeup, models…)'), rsearch, rlist] : h('p', { class: 'mute' }, 'Tip: add people in the Directory to book them here.'),
+    places.length ? field('Place from directory', placeSel) : null, field('Place', f.loc), field('Map link', f.locLink), field('Notes (look, props, contact)', f.notes), field('Models (name | phone | portfolio link | note)', f.models), field('Day plan (time + step)', f.plan), dir.length ? [h('label', {}, 'Book from directory (photographers, makeup, models…)'), rsearch, h('label', { class: 'chk' }, freeOnly, 'Only people free on the shoot date ', freeNote), rlist] : h('p', { class: 'mute' }, 'Tip: add people in the Directory to book them here.'),
     !existing && field('Shot list', f.shots), h('label', {}, 'Who is going (team)'), crew,
-    h('p', { class: 'mute' }, me.auto_messages ? '📨 New people and any date / time / place change are messaged automatically.' : '📨 New people are notified in the app. Auto-sending to phones is not set up yet (see README).'),
+    h('p', { class: 'mute' }, me.auto_messages ? '📨 New people and any date / time / place change are messaged automatically.' : '📨 New people are notified in the app. WhatsApp is not connected yet (see WHATSAPP.md).'),
     h('div', { class: 'row', style: 'margin-top:12px' }, h('button', { class: 'pri', onclick: save }, 'Save'), h('a', { class: 'btn', href: existing ? '#/shoots/' + s.id : '#/shoots' }, 'Cancel'))));
 }
 
@@ -252,7 +267,7 @@ async function bookModal(r, done) {
   sel.addEventListener('change', check); check();
   const go = () => guard(async () => {
     const res = await api('POST', `/api/shoots/${sel.value}/book`, { resource_id: r.id, fee: fee.value, note: note.value });
-    modal.remove(); toast(res.messaged ? (me.auto_messages ? 'Booked — message sent' : 'Booked — message queued (auto-send not set up)') : 'Booked — no phone number, contact them on Instagram / email'); done();
+    modal.remove(); toast(res.messaged ? (me.auto_messages ? 'Booked — sending WhatsApp message (see Messages sent on the shoot)' : 'Booked — WhatsApp is not connected yet, so no message was sent. Use the WhatsApp button.') : 'Booked — no phone number, contact them on Instagram / email'); done();
   });
   modal.append(h('div', { class: 'box', style: 'max-width:420px' }, h('h2', { style: 'margin-top:0' }, 'Book ' + r.name), h('div', { class: 'mute' }, KIND_ONE[r.kind] + (r.city ? ' · ' + r.city : '')),
     shoots.length ? [field('Which shoot?', sel), warn, field('Agreed fee (optional)', fee), field('Note for them (optional)', note),

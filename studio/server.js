@@ -162,14 +162,32 @@ async function readJson(req) {
 const KIND_LABEL = { photographer: 'photographer', product_photographer: 'product photographer', makeup: 'makeup artist', art_director: 'art director', costume: 'costume designer', props: 'props', model: 'model' };
 const NOTIFY_URL = process.env.NOTIFY_WEBHOOK_URL || '';
 const shootLines = (s) => `📷 ${s.title}${s.client ? ' (' + s.client + ')' : ''}\n📅 ${s.shoot_date}${s.start_time ? ' at ' + s.start_time : ''}\n📍 ${s.location || 'Location to be confirmed'}`;
+// WhatsApp Cloud API (Meta). With WHATSAPP_TEMPLATE set, messages go out as that approved template
+// (needed to message people who haven't written to you in the last 24h); the template body must be a single {{1}}.
+const WA = { token: process.env.WHATSAPP_TOKEN, phoneId: process.env.WHATSAPP_PHONE_ID, template: process.env.WHATSAPP_TEMPLATE,
+  lang: process.env.WHATSAPP_TEMPLATE_LANG || 'en', base: process.env.WHATSAPP_API_BASE || 'https://graph.facebook.com/v21.0' };
+const WA_ON = !!(WA.token && WA.phoneId);
+async function sendWhatsApp(phone, text) {
+  const to = phone.replace(/\D/g, '');
+  const flat = text.replace(/\s*\n+\s*/g, ' • ').replace(/ {2,}/g, ' ').slice(0, 1000); // template variables can't contain newlines
+  const body = WA.template
+    ? { messaging_product: 'whatsapp', to, type: 'template', template: { name: WA.template, language: { code: WA.lang }, components: [{ type: 'body', parameters: [{ type: 'text', text: flat }] }] } }
+    : { messaging_product: 'whatsapp', to, type: 'text', text: { body: text } };
+  const r = await fetch(`${WA.base}/${WA.phoneId}/messages`, { method: 'POST', headers: { Authorization: 'Bearer ' + WA.token, 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(10000) });
+  if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(String(j.error?.message || 'HTTP ' + r.status).slice(0, 200)); }
+}
 async function deliver({ shootId, name, phone, text }) {
   let status = 'skipped', error = '';
   if (!phone) error = 'No phone number saved';
-  else if (!NOTIFY_URL) error = 'Auto-send is not set up (NOTIFY_WEBHOOK_URL)';
+  else if (!WA_ON && !NOTIFY_URL) error = 'WhatsApp is not connected yet (see WHATSAPP.md)';
   else {
     try {
-      const r = await fetch(NOTIFY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ to: phone, name, message: text }), signal: AbortSignal.timeout(10000) });
-      status = r.ok ? 'sent' : 'failed'; if (!r.ok) error = 'HTTP ' + r.status;
+      if (WA_ON) await sendWhatsApp(phone, text);
+      else {
+        const r = await fetch(NOTIFY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ to: phone, name, message: text }), signal: AbortSignal.timeout(10000) });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+      }
+      status = 'sent';
     } catch (e) { status = 'failed'; error = e.message; }
   }
   run('INSERT INTO outbox (shoot_id, to_name, to_phone, text, status, error, created) VALUES (?,?,?,?,?,?,?)', shootId, name, phone || '', text, status, error, now());
@@ -224,7 +242,7 @@ route('POST', '/api/logout', (c) => {
 }, { auth: false });
 route('GET', '/api/me', (c) => {
   if (!c.u) throw new HttpError(401, 'Not logged in');
-  return { ...c.u, client: CLIENT_NAME, phone: q1('SELECT phone FROM users WHERE id = ?', c.u.id).phone, auto_messages: !!NOTIFY_URL, unread: q1('SELECT COUNT(*) n FROM notifications WHERE user_id = ? AND read = 0', c.u.id).n };
+  return { ...c.u, client: CLIENT_NAME, phone: q1('SELECT phone FROM users WHERE id = ?', c.u.id).phone, auto_messages: WA_ON || !!NOTIFY_URL, unread: q1('SELECT COUNT(*) n FROM notifications WHERE user_id = ? AND read = 0', c.u.id).n };
 }, { auth: false });
 route('PUT', '/api/me/phone', async (c) => { const b = await c.body(); run('UPDATE users SET phone = ? WHERE id = ?', cleanPhone(b.phone), c.u.id); return { ok: true }; });
 route('GET', '/api/notifications', (c) => q('SELECT id, shoot_id, text, read, created FROM notifications WHERE user_id = ? ORDER BY id DESC LIMIT 30', c.u.id));
@@ -586,6 +604,14 @@ route('GET', '/api/resources', (c) => {
   need(c.u, 'admin', 'photographer');
   const kind = c.url.searchParams.get('kind'), qs = '%' + str(c.url.searchParams.get('q'), 60).toLowerCase() + '%';
   const rows = q(`SELECT * FROM resources WHERE (? IS NULL OR kind = ?) AND (lower(name) LIKE ? OR lower(city) LIKE ? OR lower(category) LIKE ?) ORDER BY name LIMIT 1000`, kind, kind, qs, qs, qs);
+  const date = c.url.searchParams.get('date'), exclude = +c.url.searchParams.get('exclude') || 0;
+  if (date && isDate(date)) {
+    const busy = new Map();
+    for (const b of q(`SELECT sr.resource_id rid, s.id shoot_id, s.title, sr.status FROM shoot_resources sr JOIN shoots s ON s.id = sr.shoot_id WHERE s.shoot_date = ? AND s.id != ? AND s.status != 'cancelled' AND sr.status != 'declined'`, date, exclude)) {
+      if (!busy.has(b.rid)) busy.set(b.rid, []); busy.get(b.rid).push(b);
+    }
+    for (const r of rows) r.busy = busy.get(r.id) || [];
+  }
   const up = new Map();
   for (const b of q(`SELECT sr.resource_id rid, s.id shoot_id, s.title, s.shoot_date, sr.status FROM shoot_resources sr JOIN shoots s ON s.id = sr.shoot_id WHERE s.shoot_date >= ? AND s.status != 'cancelled' AND sr.status != 'declined' ORDER BY s.shoot_date`, today())) {
     if (!up.has(b.rid)) up.set(b.rid, []); up.get(b.rid).push(b);
