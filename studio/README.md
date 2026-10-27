@@ -24,7 +24,7 @@ First login: username `admin`, PIN = `ADMIN_PIN` (default `1234` — change it u
 - **Shoot**: title, client, **date, time, place** (pick a studio/resort from the Directory or type one, plus map link), notes.
 - **Who is going**: pick team members; each answers ✅ Going / ❌ Can't go in the app.
 - **Booked crew**: book photographers, makeup artists, art directors, costume designers, props and models from the **Directory**. In the shoot form the list shows who is **already booked on the shoot date** (hidden by default; untick *Only people free on the shoot date* to see everyone).
-- **Models**: one-off models can be typed in as `Name | phone | portfolio link | note` (a **portfolio link** button is shown). Regular models can live in the Directory.
+- **Models**: models live in the **Directory → Models** (name, phone, **portfolio link**). In the shoot form tick them from the list, or use **➕ New model** to add one on the spot — it is saved to the Directory so you can book them again later. Import a models sheet the same way as the other tabs: headings like *Model Name, Mobile, Portfolio, Height* are understood, and the app shows how each column was read.
 - **Day plan**: timeline, e.g. `08:30 Setup & lights`. **Shot list** with tick boxes.
 - **Suggestions & feedback**: anyone on the team can post on a shoot.
 - **Photos**: upload many at once → *Uploaded → Edited → Approved / Rejected*, with comments. Only **approved** photos can be attached to a post.
@@ -38,7 +38,7 @@ First login: username `admin`, PIN = `ADMIN_PIN` (default `1234` — change it u
 - **Admin → Reports**: counts **daily, weekly (Mon–Sun) and monthly** — shoots, photos uploaded/approved, posts planned/posted, reels and statics done — plus a **per-person** table and CSV download.
 
 ## Directory — load your "Shoot_Requirements" Google Sheet
-Open **Directory**, choose a tab (Studios, Resorts, Photographers, …), then **Import**: in Google Sheets open the matching tab → *File → Download → CSV* and choose the file. Columns are matched by their headings (Name, Location/CITY, Phone Number/Number/Contact, Instagram, Charges, Rating, …); anything else goes into Notes. Re-importing is safe: names already there are kept and only empty fields are filled. "DM" contacts have no phone, so the card shows the Instagram link instead. Phone numbers without a country code get `+91` (`DEFAULT_COUNTRY_CODE` to change).
+Open **Directory**, choose a tab (Studios, Resorts, Photographers, …), then **Import**: in Google Sheets open the matching tab → *File → Download → CSV* and choose the file. Columns are matched by their headings, flexibly (Name / Model Name, Phone / Mobile / WhatsApp / Contact, Instagram / Portfolio / Website, City / Location, Charges, Rating, …); anything else goes into Notes, serial-number columns are ignored, and after importing the app lists how each column was read. Re-importing is safe: names already there are kept and only empty fields are filled. "DM" contacts have no phone, so the card shows the Instagram link instead. Phone numbers without a country code get `+91` (`DEFAULT_COUNTRY_CODE` to change).
 > Phone numbers stay in your app's database only — they are not stored in the code repository.
 
 ## Booking from the photographer list

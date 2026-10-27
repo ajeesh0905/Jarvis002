@@ -103,7 +103,15 @@ function setMembers(shootId, ids) {
   return added;
 }
 const cleanUrl = (v) => { v = str(v, 300); if (!v) return ''; if (!/^https?:\/\//i.test(v)) v = 'https://' + v; try { const u = new URL(v); if (!/^https?:$/.test(u.protocol) || !u.hostname.includes('.')) throw 0; return u.href; } catch { throw bad('Invalid portfolio link: ' + v); } };
-const cleanPhone = (v) => { v = str(v, 30).replace(/[\s()-]/g, ''); if (v && !/^\+?\d{7,15}$/.test(v)) throw bad('Phone number looks wrong: ' + v); return v; };
+const cleanPhone = (v) => {
+  let d = str(v, 30).replace(/[\s().-]/g, ''); if (!d) return '';
+  const cc = process.env.DEFAULT_COUNTRY_CODE || '91';
+  if (/^\d{10}$/.test(d)) d = '+' + cc + d;               // 9876543210 -> +919876543210
+  else if (/^0\d{10}$/.test(d)) d = '+' + cc + d.slice(1); // 09876543210
+  else if (/^\d{11,15}$/.test(d)) d = '+' + d;             // 919876543210
+  if (!/^\+\d{7,15}$/.test(d)) throw bad('Phone number looks wrong: ' + str(v, 30));
+  return d;
+};
 // directory people/places booked on a shoot; returns newly booked resource rows
 function setResources(shootId, ids) {
   const prev = new Map(q('SELECT * FROM shoot_resources WHERE shoot_id = ?', shootId).map(r => [r.resource_id, r]));
@@ -555,29 +563,57 @@ function splitContact(v) {
   else if (!em && d.length >= 11 && d.length <= 15) out.phone = '+' + d;
   return out;
 }
-// header names in the sheet tabs -> our fields
-const COLS = { name: ['name', 'resort/location'], city: ['city'], contact: ['phone number', 'number', 'contact', 'contact details', 'phone'],
-  link: ['instagram', 'instagram id', 'instagram link', 'instagram/behance', 'works url', 'website', 'link'], maps: ['location link', 'maps'],
-  category: ['category'], style: ['work style'], rating: ['rating'], charge: ['charges', 'charge per day', 'costing day', 'quotation', 'charge'], distance: ['location from cbe', 'distance'], notes: ['comments', 'note', 'notes'] };
+// Work out which of our fields a sheet column belongs to, from its heading (case/wording tolerant).
+const FIELD_LABEL = { name: 'Name', city: 'City', location: 'City / map link', contact: 'Phone / email', link: 'Link (Instagram / portfolio)', maps: 'Map link', category: 'Category', style: 'Work style', rating: 'Rating', charge: 'Charge', distance: 'Distance', notes: 'Notes' };
+function classifyHeader(raw) {
+  const h = String(raw).trim().toLowerCase();
+  if (!h || /^(date|s\.? ?no\.?|sl\.? ?no\.?|sr\.? ?no\.?|#|id)$/.test(h)) return 'skip'; // serial numbers / dates add nothing
+  if (/map/.test(h) || (/location|address/.test(h) && /link|url/.test(h))) return 'maps';
+  if (/from cbe|distance|\bkms?\b/.test(h)) return 'distance';
+  if (/instagram|insta\b|portfolio|behance|website|works? ?(url|link)|profile|\blink\b|\burl\b/.test(h)) return 'link';
+  if (/phone|mobile|whats ?app|contact|number|e-?mail|\bno\.?$/.test(h)) return 'contact';
+  if (/charge|cost|fee|quotation|price|budget|per day|rate per/.test(h)) return 'charge';
+  if (/rating|stars?/.test(h)) return 'rating';
+  if (/style/.test(h)) return 'style';
+  if (/categor|type|specialit/.test(h)) return 'category';
+  if (/^(city|town|place)$/.test(h)) return 'city';
+  if (/^(location|area)$/.test(h)) return 'location'; // an area name in some tabs, a map link in others
+  if (/comment|note|remark/.test(h)) return 'notes';
+  if (/name|resort\/location|artist|^model$/.test(h)) return 'name';
+  return null;
+}
 function importRows(kind, rows) {
   if (rows.length < 2) throw bad('The file has no rows');
-  const head = rows[0].map(h => h.trim().toLowerCase());
-  const idx = (field) => head.findIndex(h => COLS[field].includes(h));
-  const col = Object.fromEntries(Object.keys(COLS).map(f => [f, idx(f)]));
-  const locIdx = head.indexOf('location');
-  const used = new Set([...Object.values(col), locIdx, head.indexOf('date')]);
-  if (col.name < 0) throw bad('Could not find a "Name" column in the first row');
-  let added = 0, updated = 0, skipped = 0;
+  const col = {}, notesCols = [], report = [];
+  rows[0].forEach((raw, i) => {
+    const f = classifyHeader(raw);
+    if (f === 'skip') return;
+    if (f && col[f] === undefined) { col[f] = i; report.push({ column: String(raw).trim(), field: FIELD_LABEL[f] }); }
+    else if (String(raw).trim()) { notesCols.push(i); report.push({ column: String(raw).trim(), field: 'Notes' }); }
+  });
+  let assumed = false;
+  if (col.name === undefined) { // no obvious name column: use the first unrecognised column — but only if the file is otherwise recognisable
+    if (!Object.keys(col).length) throw bad('Could not recognise any columns. Headings found: ' + rows[0].map(x => String(x).trim()).filter(Boolean).join(', ') + '. Use headings like Name, Phone, Instagram.');
+    const taken = new Set(Object.values(col)); const first = rows[0].findIndex((_, i) => !taken.has(i));
+    if (first < 0) throw bad('Could not find a Name column in the first row');
+    col.name = first; assumed = true; const k = notesCols.indexOf(first); if (k >= 0) notesCols.splice(k, 1);
+    report.forEach(r => { if (r.column === String(rows[0][first]).trim()) r.field = 'Name'; });
+  }
+  let added = 0, updated = 0, skipped = 0, notesExtra = '';
   for (const r of rows.slice(1, 2001)) {
-    const g = (i) => (i >= 0 ? String(r[i] ?? '').trim() : '');
-    const name = g(col.name).slice(0, 120); if (!name) { skipped++; continue; }
+    const g = (f) => (col[f] !== undefined ? String(r[col[f]] ?? '').trim() : '');
+    const name = g('name').slice(0, 120); if (!name) { skipped++; continue; }
     // a "Location" column is a map link in some tabs and an area name in others
-    const loc = g(locIdx);
-    const rec = { city: g(col.city).slice(0, 80) || (!isUrl(loc) ? loc.slice(0, 80) : ''), maps: g(col.maps) || (isUrl(loc) ? loc : ''),
-      link: firstUrl(g(col.link)) || g(col.link).slice(0, 300), category: g(col.category).slice(0, 120), style: g(col.style).slice(0, 120), rating: g(col.rating).slice(0, 40),
-      charge: g(col.charge).slice(0, 120), distance: g(col.distance).slice(0, 60), ...splitContact(g(col.contact)) };
-    let notes = g(col.notes);
-    head.forEach((h, i) => { if (!used.has(i) && h && g(i)) notes += (notes ? '\n' : '') + `${rows[0][i].trim()}: ${g(i).slice(0, 300)}`; });
+    const loc = g('location');
+    const rec = { city: (g('city') || (isUrl(loc) ? '' : loc)).slice(0, 80), maps: g('maps') || (isUrl(loc) ? loc : ''), link: firstUrl(g('link')) || g('link').slice(0, 300), category: g('category').slice(0, 120), style: g('style').slice(0, 120), rating: g('rating').slice(0, 40),
+      charge: g('charge').slice(0, 120), distance: g('distance').slice(0, 60) };
+    if (isUrl(rec.city)) { rec.maps = rec.maps || rec.city; rec.city = ''; }
+    if (g('city') && loc && !isUrl(loc) && g('city') !== loc) notesExtra = 'Location: ' + loc;
+    const cont = g('contact'); const sc = splitContact(cont); rec.phone = sc.phone; rec.email = sc.email;
+    let notes = g('notes');
+    if (notesExtra) { notes += (notes ? '\n' : '') + notesExtra; notesExtra = ''; }
+    for (const i of notesCols) { const v = String(r[i] ?? '').trim(); if (v) notes += (notes ? '\n' : '') + `${String(rows[0][i]).trim()}: ${v.slice(0, 300)}`; }
+    if (cont && !sc.phone && !sc.email && !/^(dm|na|n\/a|-)$/i.test(cont)) notes += (notes ? '\n' : '') + 'Contact: ' + cont.slice(0, 100);
     rec.notes = notes.slice(0, 1500);
     rec.maps = isUrl(rec.maps) ? rec.maps.slice(0, 1500) : ''; if (rec.link && !isUrl(rec.link)) { rec.notes = (rec.notes ? rec.notes + '\n' : '') + rec.link; rec.link = ''; }
     const have = q1('SELECT id FROM resources WHERE kind = ? AND lower(name) = lower(?)', kind, name);
@@ -592,7 +628,7 @@ function importRows(kind, rows) {
       added++;
     }
   }
-  return { added, updated, skipped };
+  return { added, updated, skipped, columns: report, assumed_name_column: assumed };
 }
 function resInput(b, cur = {}) {
   const name = str(b.name ?? cur.name, 120); if (!name) throw bad('Name is required');
@@ -603,6 +639,10 @@ function resInput(b, cur = {}) {
     category: str(b.category ?? cur.category ?? '', 120), style: str(b.style ?? cur.style ?? '', 120), rating: str(b.rating ?? cur.rating ?? '', 40), charge: str(b.charge ?? cur.charge ?? '', 120),
     distance: str(b.distance ?? cur.distance ?? '', 60), notes: str(b.notes ?? cur.notes ?? '', 1500) };
 }
+route('GET', '/api/resources/counts', (c) => {
+  need(c.u, 'admin', 'photographer');
+  return Object.fromEntries(q('SELECT kind, COUNT(*) n FROM resources GROUP BY kind').map(r => [r.kind, r.n]));
+});
 route('GET', '/api/resources', (c) => {
   need(c.u, 'admin', 'photographer');
   const kind = c.url.searchParams.get('kind'), qs = '%' + str(c.url.searchParams.get('q'), 60).toLowerCase() + '%';

@@ -116,11 +116,9 @@ async function shootForm(existing) {
     title: h('input', { value: s.title, maxlength: 120 }), client: h('input', { value: s.client }), date: h('input', { type: 'date', value: s.shoot_date }),
     time: h('input', { type: 'time', value: s.start_time }), loc: h('input', { value: s.location }), locLink: h('input', { value: s.location_link || '', placeholder: 'Map link (optional)' }), notes: h('textarea', {}),
     shots: h('textarea', { placeholder: 'One shot per line' }),
-    models: h('textarea', { placeholder: 'One model per line:\nName | phone | portfolio link | note' }),
     plan: h('textarea', { placeholder: 'One step per line:\n08:30 Setup & lights\n10:00 Model look 1' }),
   };
   f.notes.value = s.notes;
-  f.models.value = s.models.map(m => [m.name, m.phone, m.portfolio, m.note].join(' | ').replace(/( \| )+$/, '')).join('\n');
   f.plan.value = s.plan.map(i => (i.at_time ? i.at_time + ' ' : '') + i.text).join('\n');
   const places = dir.filter(r => r.kind === 'studio' || r.kind === 'resort');
   const placeSel = h('select', { onchange: (e) => { const r = places.find(p => p.id === +e.target.value); if (r) { f.loc.value = r.name + (r.city ? ', ' + r.city : ''); f.locLink.value = r.maps || ''; } } },
@@ -144,18 +142,36 @@ async function shootForm(existing) {
   const rsearch = h('input', { type: 'search', placeholder: 'Search the directory…', oninput: (e) => { textFilter = e.target.value.toLowerCase(); drawList(); } });
   f.date.addEventListener('change', async () => { if (!f.date.value) return; const d = await dirFor(f.date.value); people = d.filter(r => r.kind !== 'studio' && r.kind !== 'resort'); drawList(); });
   drawList();
+  let clearLegacy = false;
+  const nm = { name: h('input', { placeholder: 'Model name' }), phone: h('input', { type: 'tel', placeholder: 'Phone / WhatsApp (optional)' }), link: h('input', { placeholder: 'Portfolio link (optional)' }) };
+  const httpify = (v) => { v = v.trim(); return v && !/^https?:\/\//i.test(v) ? 'https://' + v : v; };
+  // save a model to the Directory (or reuse the one already there) and tick it for this shoot
+  const saveModel = async (m) => {
+    const have = people.find(p => p.kind === 'model' && p.name.toLowerCase() === m.name.trim().toLowerCase());
+    if (have) { resIds.add(have.id); return false; }
+    const r = await api('POST', '/api/resources', { kind: 'model', name: m.name, phone: m.phone || '', link: httpify(m.link || ''), notes: m.note || '' });
+    people.push({ id: r.id, kind: 'model', name: m.name.trim(), city: '', category: '', phone: m.phone || '', busy: [] }); resIds.add(r.id); return true;
+  };
+  const addModelBox = h('details', { class: 'card', open: !people.some(p => p.kind === 'model') }, h('summary', {}, '➕ New model (saved to the Directory so you can book them again)'),
+    nm.name, h('div', { style: 'height:6px' }), nm.phone, h('div', { style: 'height:6px' }), nm.link,
+    h('div', { style: 'margin-top:8px' }, h('button', { onclick: () => guard(async () => {
+      if (!nm.name.value.trim()) throw new Error("Enter the model's name");
+      const isNew = await saveModel({ name: nm.name.value, phone: nm.phone.value, link: nm.link.value });
+      nm.name.value = nm.phone.value = nm.link.value = ''; drawList(); toast(isNew ? 'Saved to the Directory and ticked for this shoot' : 'Already in the Directory — ticked for this shoot');
+    }) }, 'Add this model')));
+  const legacy = existing && s.models.length ? h('div', { class: 'card' }, h('b', {}, 'Models typed earlier are not in the Directory'), h('div', { class: 'mute' }, s.models.map(m => m.name).join(', ')),
+    h('div', { style: 'margin-top:8px' }, h('button', { onclick: () => guard(async () => { for (const m of s.models) await saveModel({ name: m.name, phone: m.phone, link: m.portfolio, note: m.note }); clearLegacy = true; drawList(); toast('Added to the Directory and ticked — press Save'); }) }, 'Add them to the Directory'))) : null;
   const memberIds = new Set(s.members.map(m => m.id));
   const crew = users.filter(u => u.role !== 'social' || memberIds.has(u.id) || true).map(u => h('label', { class: 'chk' }, h('input', { type: 'checkbox', checked: memberIds.has(u.id), onchange: (e) => e.target.checked ? memberIds.add(u.id) : memberIds.delete(u.id) }), u.name + ' (' + ROLE_LABEL[u.role] + ')'));
-  const parseModels = () => f.models.value.split('\n').map(l => l.trim()).filter(Boolean).map(l => { const [name, phone, portfolio, ...note] = l.split('|').map(x => x.trim()); return { name, phone, portfolio, note: note.join(' | ') }; });
   const parsePlan = () => f.plan.value.split('\n').map(l => l.trim()).filter(Boolean).map(l => { const m = l.match(/^(\d{1,2}:\d{2})\s+(.*)$/); if (!m) return { time: '', text: l }; return { time: m[1].padStart(5, '0'), text: m[2] }; });
   const save = () => guard(async () => {
-    const body = { title: f.title.value, client: f.client.value, shoot_date: f.date.value, start_time: f.time.value, location: f.loc.value, notes: f.notes.value, members: [...memberIds], models: parseModels(), plan: parsePlan(), location_link: f.locLink.value, ...(dir.length || existing?.resources?.length ? { resources: [...resIds] } : {}) };
+    const body = { title: f.title.value, client: f.client.value, shoot_date: f.date.value, start_time: f.time.value, location: f.loc.value, notes: f.notes.value, members: [...memberIds], plan: parsePlan(), location_link: f.locLink.value, resources: [...resIds], ...(clearLegacy ? { models: [] } : {}) };
     if (existing) { await api('PUT', '/api/shoots/' + s.id, body); location.hash = '#/shoots/' + s.id; render(); }
     else { body.shots = f.shots.value.split('\n'); const r = await api('POST', '/api/shoots', body); location.hash = '#/shoots/' + r.id; }
   });
   return shell('#/shoots', h('h1', {}, existing ? 'Edit shoot' : 'New shoot'), h('div', { class: 'card' },
     field('Title', f.title), field('Client / brand', f.client), h('div', { class: 'grid2' }, field('Date', f.date), field('Start time', f.time)),
-    places.length ? field('Place from directory', placeSel) : null, field('Place', f.loc), field('Map link', f.locLink), field('Notes (look, props, contact)', f.notes), field('Models (name | phone | portfolio link | note)', f.models), field('Day plan (time + step)', f.plan), dir.length ? [h('label', {}, 'Book from directory (photographers, makeup, models…)'), rsearch, h('label', { class: 'chk' }, freeOnly, 'Only people free on the shoot date ', freeNote), rlist] : h('p', { class: 'mute' }, 'Tip: add people in the Directory to book them here.'),
+    places.length ? field('Place from directory', placeSel) : null, field('Place', f.loc), field('Map link', f.locLink), field('Notes (look, props, contact)', f.notes), field('Day plan (time + step)', f.plan), [h('label', {}, 'Book from directory (models, photographers, makeup…)'), rsearch, h('label', { class: 'chk' }, freeOnly, 'Only people free on the shoot date ', freeNote), rlist, addModelBox, legacy],
     !existing && field('Shot list', f.shots), h('label', {}, 'Who is going (team)'), crew,
     h('p', { class: 'mute' }, me.auto_messages ? '📨 New people and any date / time / place change are messaged automatically.' : '📨 New people are notified in the app. WhatsApp is not connected yet (see WHATSAPP.md).'),
     h('div', { class: 'row', style: 'margin-top:12px' }, h('button', { class: 'pri', onclick: save }, 'Save'), h('a', { class: 'btn', href: existing ? '#/shoots/' + s.id : '#/shoots' }, 'Cancel'))));
@@ -219,12 +235,12 @@ async function shootView(id) {
 }
 
 // ---------- directory (studios, resorts, crew, models) ----------
-const KIND_UI = { studio: 'Studios', resort: 'Resorts', photographer: 'Photographers', product_photographer: 'Product photographers', makeup: 'Makeup artists', art_director: 'Art directors', costume: 'Costume designers', props: 'Props', model: 'Models' };
-const KIND_ONE = { studio: 'Studio', resort: 'Resort', photographer: 'Photographer', product_photographer: 'Product photographer', makeup: 'Makeup artist', art_director: 'Art director', costume: 'Costume designer', props: 'Props', model: 'Model' };
+const KIND_UI = { studio: 'Studios', resort: 'Resorts', model: 'Models', photographer: 'Photographers', product_photographer: 'Product photographers', makeup: 'Makeup artists', art_director: 'Art directors', costume: 'Costume designers', props: 'Props' };
+const KIND_ONE = { studio: 'Studio', resort: 'Resort', model: 'Model', photographer: 'Photographer', product_photographer: 'Product photographer', makeup: 'Makeup artist', art_director: 'Art director', costume: 'Costume designer', props: 'Props' };
 const safeLink = (u) => /^https?:\/\//i.test(u || '') ? u : null;
-const linkLabel = (u) => /instagram\.com/i.test(u) ? '📷 Instagram' : /behance\.net/i.test(u) ? 'Behance' : '🔗 Link';
+const linkLabel = (u, kind) => kind === 'model' ? '🔗 Portfolio' : /instagram\.com/i.test(u) ? '📷 Instagram' : /behance\.net/i.test(u) ? 'Behance' : '🔗 Link';
 function contactLinks(r, text) {
-  return [r.link && safeLink(r.link) && h('a', { class: 'btn', href: r.link, target: '_blank', rel: 'noopener noreferrer' }, linkLabel(r.link)),
+  return [r.link && safeLink(r.link) && h('a', { class: 'btn', href: r.link, target: '_blank', rel: 'noopener noreferrer' }, linkLabel(r.link, r.kind)),
     r.maps && safeLink(r.maps) && h('a', { class: 'btn', href: r.maps, target: '_blank', rel: 'noopener noreferrer' }, '📍 Map'),
     r.phone && h('a', { class: 'btn', href: waLink(r.phone, text || ''), target: '_blank', rel: 'noopener noreferrer' }, 'WhatsApp'),
     r.phone && h('a', { class: 'btn', href: 'tel:' + r.phone }, '📞 Call'),
@@ -233,14 +249,18 @@ function contactLinks(r, text) {
 function resForm(r, kind, done) {
   const f = {}; const F = (k, label, attrs = {}) => { f[k] = h(attrs.area ? 'textarea' : 'input', { value: r[k] || '', ...attrs.attrs }); if (attrs.area) f[k].value = r[k] || ''; return field(label, f[k]); };
   const kindSel = h('select', {}, Object.entries(KIND_ONE).map(([k, l]) => h('option', { value: k, selected: k === (r.kind || kind) }, l)));
+  const linkField = F('link', 'Instagram / website link', { attrs: { placeholder: 'https://…' } });
+  const relabel = () => { linkField.firstChild.textContent = kindSel.value === 'model' ? 'Portfolio link' : 'Instagram / website link'; };
+  kindSel.addEventListener('change', relabel); relabel();
   const modal = h('div', { class: 'modal', onclick: (e) => e.target === modal && modal.remove() });
   const save = () => guard(async () => {
     const body = { kind: kindSel.value }; for (const k of Object.keys(f)) body[k] = f[k].value;
+    for (const k of ['link', 'maps']) if (body[k].trim() && !/^https?:\/\//i.test(body[k].trim())) body[k] = 'https://' + body[k].trim();
     if (r.id) await api('PUT', '/api/resources/' + r.id, body); else await api('POST', '/api/resources', body);
     modal.remove(); done();
   });
   modal.append(h('div', { class: 'box' }, h('h2', { style: 'margin-top:0' }, r.id ? 'Edit' : 'Add to directory'), field('Type', kindSel), F('name', 'Name'), F('city', 'City / area'),
-    h('div', { class: 'grid2' }, F('phone', 'Phone (+91…)', { attrs: { type: 'tel' } }), F('email', 'Email')), F('link', 'Instagram / website link', { attrs: { placeholder: 'https://…' } }), F('maps', 'Map link (for places)'),
+    h('div', { class: 'grid2' }, F('phone', 'Phone (+91…)', { attrs: { type: 'tel' } }), F('email', 'Email')), linkField, F('maps', 'Map link (for places)'),
     h('div', { class: 'grid2' }, F('category', 'Category'), F('style', 'Work style')), h('div', { class: 'grid2' }, F('rating', 'Rating'), F('charge', 'Charge / rate')), F('distance', 'Distance (e.g. 12 Kms)'), F('notes', 'Notes', { area: true }),
     h('div', { class: 'row', style: 'margin-top:12px' }, h('button', { class: 'pri', onclick: save }, 'Save'), h('button', { onclick: () => modal.remove() }, 'Cancel'),
       r.id && me.role === 'admin' && h('button', { class: 'bad', onclick: () => confirm('Delete from directory? It is also removed from shoots it was booked on.') && guard(async () => { await api('DELETE', '/api/resources/' + r.id); modal.remove(); done(); }) }, 'Delete'))));
@@ -251,7 +271,7 @@ function importPanel(kind, done) {
   const go = () => guard(async () => {
     if (!file.files[0]) throw new Error('Choose a CSV file first');
     const r = await api('POST', '/api/resources/import', { kind, csv: await file.files[0].text() });
-    toast(`Imported: ${r.added} new, ${r.updated} updated, ${r.skipped} skipped`); done();
+    sessionStorage.setItem('impres', JSON.stringify({ kind, ...r })); done();
   });
   return h('details', { class: 'card' }, h('summary', {}, `⬆ Import ${KIND_UI[kind]} from Google Sheet`),
     h('p', { class: 'mute' }, `In your Google Sheet open the "${KIND_UI[kind]}" tab → File → Download → Comma-separated values (.csv), then choose that file here. Existing names are kept and only their empty fields are filled.`), file, h('div', { style: 'margin-top:8px' }, h('button', { class: 'pri', onclick: go }, 'Import')), status);
@@ -279,7 +299,8 @@ async function directoryView(kind) {
   if (!canShoot()) return shell('#/directory', h('p', {}, 'Not available for your role.'));
   kind = KIND_UI[kind] ? kind : 'photographer';
   const q = sessionStorage.getItem('dq') || '';
-  const list = await api('GET', `/api/resources?kind=${kind}&q=${encodeURIComponent(q)}`);
+  const [list, counts] = await Promise.all([api('GET', `/api/resources?kind=${kind}&q=${encodeURIComponent(q)}`), api('GET', '/api/resources/counts').catch(() => ({}))]);
+  const imp = JSON.parse(sessionStorage.getItem('impres') || 'null');
   const search = h('input', { type: 'search', placeholder: 'Search name, city, category…', value: q, onchange: (e) => { sessionStorage.setItem('dq', e.target.value); render(); } });
   const card = (r) => h('div', { class: 'card' }, h('div', { class: 'row spread' }, h('b', {}, r.name), h('div', { class: 'row' }, kind !== 'studio' && kind !== 'resort' && h('button', { class: 'pri', onclick: () => bookModal(r, render) }, 'Book'), h('button', { onclick: () => resForm(r, kind, render) }, 'Edit'))),
     h('div', { class: 'mute' }, [r.city, r.category, r.style, r.rating && '⭐ ' + r.rating, r.charge && '₹ ' + r.charge, r.distance].filter(Boolean).join(' · ')),
@@ -287,7 +308,10 @@ async function directoryView(kind) {
     r.upcoming?.length ? h('div', { style: 'font-size:.9rem;margin-top:4px' }, r.upcoming.map(u => h('div', {}, '📅 ', h('a', { href: '#/shoots/' + u.shoot_id }, fmtDate(u.shoot_date) + ' · ' + u.title), ' ', h('span', { class: 'mute' }, BOOK_STATUS[u.status])))) : null,
     r.notes ? h('div', { class: 'mute', style: 'white-space:pre-wrap' }, r.notes) : null, h('div', { class: 'row', style: 'margin-top:6px' }, contactLinks(r)));
   return shell('#/directory', h('div', { class: 'row spread' }, h('h1', {}, 'Directory'), h('button', { class: 'pri', onclick: () => resForm({}, kind, render) }, '+ Add')),
-    h('div', { class: 'row', style: 'gap:6px;margin-bottom:8px' }, Object.entries(KIND_UI).map(([k, l]) => h('a', { class: 'btn' + (k === kind ? ' pri' : ''), href: '#/directory/' + k }, l))),
+    h('div', { class: 'row', style: 'gap:6px;margin-bottom:8px' }, Object.entries(KIND_UI).map(([k, l]) => h('a', { class: 'btn' + (k === kind ? ' pri' : ''), href: '#/directory/' + k, onclick: () => sessionStorage.removeItem('dq') }, `${l} (${counts[k] || 0})`))),
+    imp ? h('div', { class: 'card' }, h('b', {}, `Import finished (${KIND_UI[imp.kind]}): ${imp.added} new, ${imp.updated} updated, ${imp.skipped} skipped`), imp.assumed_name_column ? h('div', { class: 'err' }, 'No "Name" heading was found, so the first column was used as the name.') : null,
+      h('div', { class: 'mute', style: 'margin-top:4px' }, 'How your columns were read:'), imp.columns.map(c => h('div', { style: 'font-size:.9rem' }, `${c.column}  →  ${c.field}`)),
+      h('div', { style: 'margin-top:8px' }, h('button', { onclick: () => { sessionStorage.removeItem('impres'); render(); } }, 'OK'))) : null,
     search, h('p', { class: 'mute' }, `${list.length} ${KIND_UI[kind].toLowerCase()}`), importPanel(kind, render), list.length ? list.map(card) : h('p', { class: 'mute' }, 'Nothing here yet — add one or import your sheet tab.'));
 }
 
