@@ -39,10 +39,11 @@ function shell(active, ...content) {
   const tabs = [['#/', 'Home'], ['#/shoots', 'Shoots'], ...(canShoot() ? [['#/directory', 'Directory']] : []), ['#/posts', 'Posts'], ['#/board', 'Board'], me.role === 'admin' ? ['#/admin', 'Admin'] : ['#/me', 'Me']];
   return h('div', {}, h('main', {}, ...content), h('nav', {}, tabs.map(([href, t]) => h('a', { href, class: active === href ? 'on' : '' }, t))));
 }
+let renderSeq = 0; // only the newest page load may draw, so quick taps can't show an older screen
 async function render() {
-  const hash = location.hash || '#/';
+  const mine = ++renderSeq, hash = location.hash || '#/';
   if (!me) {
-    try { me = await api('GET', '/api/me'); } catch { return $app.replaceChildren(loginView()); }
+    try { me = await api('GET', '/api/me'); } catch { return mine === renderSeq && $app.replaceChildren(loginView()); }
   }
   if (!users.length) users = await api('GET', '/api/users').catch(() => []);
   const [, a, b] = hash.match(/^#\/([^/]*)\/?(.*)$/) || [];
@@ -59,8 +60,8 @@ async function render() {
     else if (a === 'reports' && me.role === 'admin') v = await reportsView(b);
     else if (a === 'me') v = meView();
     else v = shell('', h('p', {}, 'Page not found'));
-    $app.replaceChildren(v);
-  } catch (e) { $app.replaceChildren(shell('', h('div', { class: 'err' }, e.message))); }
+    if (mine === renderSeq) $app.replaceChildren(v);
+  } catch (e) { if (mine === renderSeq) $app.replaceChildren(shell('', h('div', { class: 'err' }, e.message))); }
 }
 window.addEventListener('hashchange', render);
 
