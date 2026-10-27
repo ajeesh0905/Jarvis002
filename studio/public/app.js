@@ -339,7 +339,10 @@ async function boardView(month) {
   const line = (type, label, count) => {
     const extras = d.slots.filter(x => x.type === type && x.slot > count).map(x => x.slot), nums = [...Array(count).keys()].map(i => i + 1).concat(extras);
     const done = d.slots.filter(x => x.type === type && x.done).length;
+    const mc = { reel: 'var(--c-reel)', static: 'var(--c-static)', carousel: 'var(--c-carousel)' }[type];
+    const doneInTarget = d.slots.filter(x => x.type === type && x.done && x.slot <= count).length;
     return h('div', { class: 'card' }, h('div', { class: 'row spread' }, h('b', {}, label), h('span', { class: 'mute' }, `${done}/${count}` + (extras.length ? ` +${extras.length} extra` : ''))),
+      h('div', { class: 'meter', style: '--mc:' + mc, role: 'img', 'aria-label': `${doneInTarget} of ${count} done` }, h('i', { style: `width:${count ? Math.min(100, (doneInTarget / count) * 100) : 0}%` })),
       h('div', { class: 'row', style: 'margin-top:8px;gap:6px' }, nums.map(n => { const x = slot(type, n); return h('button', { class: 'slot' + (x?.done ? ' done' : '') + (n > count ? ' extra' : ''), onclick: () => open(type, n) }, String(n), x?.tag && h('small', {}, x.tag)); }),
         edit && h('button', { class: 'slot add', title: 'Add extra', onclick: () => guard(async () => { await api('PUT', '/api/board/slot', { month, type, slot: Math.max(count, ...extras) + 1, add: true }); render(); }) }, '+')));
   };
@@ -377,6 +380,88 @@ async function dayView(date) {
     canShoot() && h('p', {}, h('a', { class: 'btn', href: '#/shoots/new' }, '+ New shoot')), h('p', {}, h('a', { href: '#/' }, '← Home')));
 }
 
+// ---------- charts: small inline-SVG column charts (no library, works offline) ----------
+const SVGNS = 'http://www.w3.org/2000/svg';
+const svgEl = (tag, attrs, ...kids) => { const e = document.createElementNS(SVGNS, tag); for (const [k, v] of Object.entries(attrs || {})) e.setAttribute(k, v); for (const c of kids.flat(Infinity)) if (c != null) e.append(c.nodeType ? c : document.createTextNode(c)); return e; };
+const niceStep = (x) => { const p = 10 ** Math.floor(Math.log10(Math.max(x, 1))); for (const m of [1, 2, 5, 10]) if (m * p >= x) return m * p; return 10 * p; };
+const shortDate = (iso) => new Date(iso + 'T00:00:00Z').toLocaleDateString(undefined, { day: 'numeric', month: 'short', timeZone: 'UTC' });
+const periodShort = (p, group) => group === 'month' ? new Date(p + '-01T00:00:00Z').toLocaleDateString(undefined, { month: 'short', year: '2-digit', timeZone: 'UTC' }) : shortDate(p);
+const periodFull = (p, group) => group === 'month' ? monthLabel(p) : group === 'week' ? 'Week of ' + fmtDate(p) : fmtDate(p);
+
+// Stacked columns. rows: [{period, ...numbers}], series: [{key, label, color}] stacked bottom -> top.
+function columnChart({ title, sub, rows, group, series }) {
+  const rowTotal = (r) => series.reduce((t, s) => t + (r[s.key] || 0), 0);
+  const grand = rows.reduce((t, r) => t + rowTotal(r), 0);
+  const body = h('div', { class: 'plot' }), tip = h('div', { class: 'tip', hidden: true });
+  const wrap = h('div', { class: 'plotwrap' }, body, tip);
+  let asTable = false, lastW = 0, active = -1;
+  const toggle = h('button', { class: 'linkbtn', onclick: () => { asTable = !asTable; toggle.textContent = asTable ? 'Show chart' : 'Show table'; draw(); } }, 'Show table');
+  const fig = h('figure', { class: 'chart' },
+    h('div', { class: 'row spread', style: 'align-items:flex-start' }, h('div', {}, h('b', {}, title), h('div', { class: 'mute' }, sub)), toggle),
+    series.length > 1 ? h('div', { class: 'legend' }, series.map(s => h('span', {}, h('i', { class: 'sw', style: 'background:' + s.color }), s.label))) : null, wrap);
+
+  const roundedTop = (x, y, w, hgt, fill) => { const r = Math.min(4, hgt / 2, w / 2); return svgEl('path', { d: `M${x} ${y + hgt}V${y + r}Q${x} ${y} ${x + r} ${y}H${x + w - r}Q${x + w} ${y} ${x + w} ${y + r}V${y + hgt}Z`, fill }); };
+
+  function draw() {
+    tip.hidden = true; active = -1; body.replaceChildren();
+    if (!grand) { body.append(h('p', { class: 'mute', style: 'margin:16px 0' }, 'Nothing in this range yet.')); return; }
+    if (asTable) {
+      body.append(h('div', { style: 'overflow-x:auto' }, h('table', {}, h('thead', {}, h('tr', {}, ['Period', ...series.map(s => s.label), ...(series.length > 1 ? ['Total'] : [])].map(x => h('th', {}, x)))),
+        h('tbody', {}, rows.map(r => h('tr', {}, h('td', {}, periodFull(r.period, group)), series.map(s => h('td', { class: r[s.key] ? '' : 'mute' }, r[s.key] || 0)), series.length > 1 ? h('td', {}, rowTotal(r)) : null))))));
+      return;
+    }
+    const W = Math.max(260, Math.floor(body.clientWidth || 340)), H = 210, m = { l: 30, r: 6, t: 18, b: 24 }, pw = W - m.l - m.r, ph = H - m.t - m.b;
+    lastW = W;
+    const maxT = Math.max(...rows.map(rowTotal)), step = niceStep(maxT / 4), yMax = step * 4, y = (v) => m.t + ph - (v / yMax) * ph;
+    const n = rows.length, slot = pw / n, bw = Math.min(24, Math.max(3, slot * 0.62));
+    const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, width: W, height: H, role: 'img', 'aria-label': `${title}: ${grand} in total. Use Show table for the numbers.`, class: 'svgchart' });
+    for (let i = 0; i <= 4; i++) {            // hairline grid; the first line is the baseline
+      const v = i * step;
+      svg.append(svgEl('line', { x1: m.l, x2: W - m.r, y1: y(v), y2: y(v), stroke: i ? 'var(--grid)' : 'var(--axis)', 'stroke-width': 1 }), svgEl('text', { x: m.l - 6, y: y(v) + 3.5, 'text-anchor': 'end', class: 'ax' }, v >= 1000 ? v / 1000 + 'K' : v));
+    }
+    const band = svgEl('rect', { y: m.t, width: slot, height: ph, class: 'band', opacity: 0 }); svg.append(band);
+    const every = Math.ceil(n / Math.max(2, Math.floor(pw / 46)));
+    rows.forEach((r, i) => {
+      const x = m.l + slot * i + (slot - bw) / 2; let cum = 0, drawn = [];
+      series.forEach(s => { const v = r[s.key] || 0; if (v > 0) { drawn.push({ s, v, from: cum }); cum += v; } });
+      drawn.forEach((d, k) => {               // 2px surface gap between stacked fills, rounded data-end on the top one only
+        const top = y(d.from + d.v), hgt = Math.max(1, (d.v / yMax) * ph - (k ? 2 : 0));
+        svg.append(k === drawn.length - 1 ? roundedTop(x, top, bw, hgt, d.s.color) : svgEl('rect', { x, y: top, width: bw, height: hgt, fill: d.s.color }));
+      });
+      if (i % every === 0) svg.append(svgEl('text', { x: m.l + slot * (i + 0.5), y: H - 7, 'text-anchor': 'middle', class: 'ax' }, periodShort(r.period, group)));
+    });
+    const peak = rows.findIndex(r => rowTotal(r) === maxT);   // one selective label: the busiest period
+    svg.append(svgEl('text', { x: m.l + slot * (peak + 0.5), y: y(maxT) - 5, 'text-anchor': 'middle', class: 'peak' }, maxT));
+
+    const show = (i, clientX) => {
+      i = Math.max(0, Math.min(n - 1, i)); active = i; const r = rows[i];
+      band.setAttribute('x', m.l + slot * i); band.setAttribute('opacity', 1);
+      tip.replaceChildren(h('div', { class: 'tip-h' }, periodFull(r.period, group)),
+        ...series.slice().reverse().map(s => h('div', { class: 'tip-r' }, h('i', { class: 'key', style: 'background:' + s.color }), h('b', {}, String(r[s.key] || 0)), h('span', { class: 'mute' }, ' ' + s.label))),
+        series.length > 1 ? h('div', { class: 'tip-r tip-t' }, h('b', {}, String(rowTotal(r))), h('span', { class: 'mute' }, ' total')) : null);
+      tip.hidden = false;
+      const cx = m.l + slot * (i + 0.5), tw = tip.offsetWidth, th = tip.offsetHeight;
+      tip.style.left = Math.max(2, Math.min(W - tw - 2, cx - tw / 2)) + 'px';
+      tip.style.top = Math.max(0, y(rowTotal(r)) - th - 10) + 'px';
+    };
+    const hide = () => { tip.hidden = true; band.setAttribute('opacity', 0); active = -1; };
+    const overlay = svgEl('rect', { x: m.l, y: m.t, width: pw, height: ph, fill: 'transparent', tabindex: 0, class: 'hit', 'aria-label': 'Move across the chart or use the arrow keys to read each period' });
+    const at = (e) => { const b = overlay.getBoundingClientRect(); return Math.floor(((e.clientX - b.left) / b.width) * n); };
+    let timer;
+    overlay.addEventListener('pointermove', (e) => show(at(e)));
+    overlay.addEventListener('pointerdown', (e) => { show(at(e)); clearTimeout(timer); });
+    overlay.addEventListener('pointerleave', (e) => { if (e.pointerType === 'touch') { timer = setTimeout(hide, 2500); } else hide(); });
+    overlay.addEventListener('focus', () => show(active < 0 ? n - 1 : active));
+    overlay.addEventListener('blur', hide);
+    overlay.addEventListener('keydown', (e) => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); show((active < 0 ? n - 1 : active) + (e.key === 'ArrowRight' ? 1 : -1)); } else if (e.key === 'Escape') hide(); });
+    svg.append(overlay); body.append(svg);
+  }
+  if (typeof ResizeObserver === 'function') new ResizeObserver(() => { if (!asTable && Math.abs((body.clientWidth || 0) - lastW) > 1) draw(); }).observe(body);
+  else setTimeout(draw, 0);
+  requestAnimationFrame(draw);
+  return fig;
+}
+
 // ---------- admin: reports (day / week / month counts) ----------
 function adminHub() {
   return shell('#/admin', h('h1', {}, 'Admin'), h('a', { class: 'card', style: 'display:block;color:inherit', href: '#/reports/week' }, h('b', {}, '📊 Reports'), h('div', { class: 'mute' }, 'Counts by day, week and month')),
@@ -397,6 +482,13 @@ async function reportsView(group) {
     h('div', { class: 'row' }, ['day', 'week', 'month'].map(g => h('a', { class: 'btn' + (g === group ? ' pri' : ''), href: '#/reports/' + g }, { day: 'Daily', week: 'Weekly', month: 'Monthly' }[g]))),
     h('p', { class: 'mute' }, `${r.from} → ${r.to}. Shoots/posts count by their planned date; photos by upload day; reels, statics and carousels by the day they were marked done.`),
     h('div', { class: 'row' }, cols.map(([k, l]) => h('div', { class: 'card grow', style: 'text-align:center;min-width:80px' }, h('div', { style: 'font-size:1.4rem;font-weight:700' }, r.totals[k]), h('div', { class: 'mute' }, l)))),
+    h('h2', {}, 'Content delivered'),
+    h('div', { class: 'card' }, columnChart({ title: 'Reels, statics and carousels done', sub: `Per ${group}, marked done on the Board`, rows: r.rows, group,
+      series: [{ key: 'reels_done', label: 'Reels', color: 'var(--c-reel)' }, { key: 'statics_done', label: 'Statics', color: 'var(--c-static)' }, { key: 'carousels_done', label: 'Carousels', color: 'var(--c-carousel)' }] })),
+    h('h2', {}, 'Photos'),
+    h('div', { class: 'card' }, columnChart({ title: 'Photos uploaded', sub: `Per ${group}; the dark part is already approved`, rows: r.rows.map(x => ({ ...x, photos_pending: x.photos_uploaded - x.photos_approved })), group,
+      series: [{ key: 'photos_approved', label: 'Approved', color: 'var(--c-photo)' }, { key: 'photos_pending', label: 'Not approved yet', color: 'var(--c-other)' }] })),
+    h('h2', {}, 'All the numbers'),
     tbl(['Period', ...cols.map(c => c[1])], r.rows.slice().reverse().map(x => h('tr', {}, h('td', {}, label(x.period)), cols.map(([k]) => h('td', { class: x[k] ? '' : 'mute' }, x[k]))))),
     h('h2', {}, 'By person'), r.by_person.length ? tbl(['Name', 'Photos', 'Shoots assigned', 'Going', 'Posts', 'Reels', 'Statics', 'Carousels'], r.by_person.map(p => h('tr', {}, h('td', {}, p.name), h('td', {}, p.photos_uploaded), h('td', {}, p.shoots_assigned), h('td', {}, p.shoots_going), h('td', {}, p.posts_created), h('td', {}, p.reels_done), h('td', {}, p.statics_done), h('td', {}, p.carousels_done)))) : h('p', { class: 'mute' }, 'No activity in this range.'),
     h('p', {}, h('button', { onclick: csv }, '⬇ Download CSV')));

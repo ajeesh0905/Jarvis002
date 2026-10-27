@@ -35,7 +35,8 @@ First login: username `admin`, PIN = `ADMIN_PIN` (default `1234` — change it u
 
 ## Day by day and reports
 - **Home → Day view**: pick any date — that day's shoots (plan, who is going, models), posts, and how many photos / reels / statics / carousels were done.
-- **Admin → Reports**: counts **daily, weekly (Mon–Sun) and monthly** — shoots, photos uploaded/approved, posts planned/posted, reels, statics and carousels done — plus a **per-person** table and CSV download.
+- **Admin → Reports**: counts **daily, weekly (Mon–Sun) and monthly** — shoots, photos uploaded/approved, posts planned/posted, reels, statics and carousels done — shown as **charts** (hover or tap a bar for the numbers, arrow keys work too; *Show table* gives the same numbers as a table), plus a **per-person** table and CSV download.
+- **Board**: each of Reels / Statics / Carousels has a progress bar (same colours as the charts).
 
 ## Directory — load your "Shoot_Requirements" Google Sheet
 Open **Directory**, choose a tab (Studios, Resorts, Photographers, …), then **Import**: in Google Sheets open the matching tab → *File → Download → CSV* and choose the file. Columns are matched by their headings, flexibly (Name / Model Name, Phone / Mobile / WhatsApp / Contact, Instagram / Portfolio / Website, City / Location, Charges, Rating, …); anything else goes into Notes, serial-number columns are ignored, and after importing the app lists how each column was read. Re-importing is safe: names already there are kept and only empty fields are filled. "DM" contacts have no phone, so the card shows the Instagram link instead. Phone numbers without a country code get `+91` (`DEFAULT_COUNTRY_CODE` to change).
