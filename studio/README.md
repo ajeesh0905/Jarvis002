@@ -5,6 +5,8 @@ Works on phone and computer (open the link, then "Add to home screen"). No `npm 
 
     ADMIN_PIN=choose-a-pin npm start          # http://localhost:3100
 
+**Putting it online for the team: `DEPLOY.md`** (try on office Wi-Fi in 2 minutes; permanent server later).
+
 First login: username `admin`, PIN = `ADMIN_PIN` (default `1234` — change it under Admin → My account).
 
 ## Who can do what

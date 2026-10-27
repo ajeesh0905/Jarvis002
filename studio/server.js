@@ -35,19 +35,22 @@ const storage = createStorage({
 });
 
 // ---------- auth ----------
-function hashPin(pin, salt = crypto.randomBytes(16).toString('hex')) {
-  return salt + ':' + crypto.scryptSync(String(pin), salt, 32).toString('hex');
+// scrypt runs on the thread pool so a burst of logins doesn't freeze everyone else's requests
+const scryptAsync = (pin, salt) => new Promise((res, rej) => crypto.scrypt(String(pin), salt, 32, (e, k) => e ? rej(e) : res(k)));
+async function hashPin(pin, salt = crypto.randomBytes(16).toString('hex')) {
+  return salt + ':' + (await scryptAsync(pin, salt)).toString('hex');
 }
-function checkPin(pin, stored) {
+async function checkPin(pin, stored) {
   const [salt, h] = stored.split(':');
-  const a = Buffer.from(h, 'hex'), b = crypto.scryptSync(String(pin), salt, 32);
+  const a = Buffer.from(h, 'hex'), b = await scryptAsync(pin, salt);
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 if (!q1('SELECT 1 x FROM users')) {
   const pin = process.env.ADMIN_PIN || '1234';
-  run('INSERT INTO users (name, username, pin_hash, role) VALUES (?,?,?,?)', 'Admin', 'admin', hashPin(pin), 'admin');
+  run('INSERT INTO users (name, username, pin_hash, role) VALUES (?,?,?,?)', 'Admin', 'admin', await hashPin(pin), 'admin');
   console.log(`Created first user: username "admin", PIN "${pin}" — change it under Team.`);
 }
+run('DELETE FROM sessions WHERE created < ?', now() - SESSION_DAYS * 864e5); // purge expired logins
 
 const fails = new Map(); // ip+user -> {n, until}
 function throttled(key) { const f = fails.get(key); return f && f.until > now() && f.n >= 5; }
@@ -228,7 +231,7 @@ route('POST', '/api/login', async (c) => {
   const key = c.req.socket.remoteAddress + '|' + str(b.username, 60).toLowerCase();
   if (throttled(key)) throw new HttpError(429, 'Too many attempts. Try again in 10 minutes.');
   const user = q1('SELECT * FROM users WHERE username = ? AND active = 1', str(b.username, 60).toLowerCase());
-  if (!user || !checkPin(str(b.pin, 100), user.pin_hash)) { noteFail(key); throw new HttpError(401, 'Wrong username or PIN'); }
+  if (!user || !(await checkPin(str(b.pin, 100), user.pin_hash))) { noteFail(key); throw new HttpError(401, 'Wrong username or PIN'); }
   fails.delete(key);
   const token = crypto.randomBytes(32).toString('hex');
   run('INSERT INTO sessions VALUES (?,?,?)', token, user.id, now());
@@ -256,7 +259,7 @@ route('POST', '/api/users', async (c) => {
   if (!/^[a-z0-9._-]{2,30}$/.test(username)) throw bad('Username: 2-30 letters/numbers');
   if (!/^\d{4,8}$/.test(str(b.pin, 20))) throw bad('PIN must be 4-8 digits');
   if (q1('SELECT 1 x FROM users WHERE username = ?', username)) throw bad('Username already taken');
-  const r = run('INSERT INTO users (name, username, pin_hash, role, phone) VALUES (?,?,?,?,?)', str(b.name, 80) || username, username, hashPin(str(b.pin, 20)), oneOf(b.role, ['admin', 'photographer', 'social'], 'role'), cleanPhone(b.phone));
+  const r = run('INSERT INTO users (name, username, pin_hash, role, phone) VALUES (?,?,?,?,?)', str(b.name, 80) || username, username, await hashPin(str(b.pin, 20)), oneOf(b.role, ['admin', 'photographer', 'social'], 'role'), cleanPhone(b.phone));
   return { id: Number(r.lastInsertRowid) };
 });
 route('PUT', '/api/users/(\\d+)', async (c) => {
@@ -266,7 +269,7 @@ route('PUT', '/api/users/(\\d+)', async (c) => {
   const active = b.active === undefined ? cur.active : (b.active ? 1 : 0);
   if (id === c.u.id && (!active || role !== 'admin')) throw bad("You can't remove your own admin access");
   let hash = cur.pin_hash;
-  if (b.pin) { if (!/^\d{4,8}$/.test(str(b.pin, 20))) throw bad('PIN must be 4-8 digits'); hash = hashPin(str(b.pin, 20)); }
+  if (b.pin) { if (!/^\d{4,8}$/.test(str(b.pin, 20))) throw bad('PIN must be 4-8 digits'); hash = await hashPin(str(b.pin, 20)); }
   run('UPDATE users SET name = ?, role = ?, active = ?, pin_hash = ?, phone = ? WHERE id = ?', str(b.name, 80) || cur.name, role, active, hash, b.phone === undefined ? cur.phone : cleanPhone(b.phone), id);
   if (!active || b.pin) run('DELETE FROM sessions WHERE user_id = ?', id);
   return { ok: true };
@@ -274,9 +277,9 @@ route('PUT', '/api/users/(\\d+)', async (c) => {
 route('POST', '/api/me/pin', async (c) => {
   const b = await c.body();
   const cur = q1('SELECT pin_hash FROM users WHERE id = ?', c.u.id);
-  if (!checkPin(str(b.current, 100), cur.pin_hash)) throw bad('Current PIN is wrong');
+  if (!(await checkPin(str(b.current, 100), cur.pin_hash))) throw bad('Current PIN is wrong');
   if (!/^\d{4,8}$/.test(str(b.pin, 20))) throw bad('PIN must be 4-8 digits');
-  run('UPDATE users SET pin_hash = ? WHERE id = ?', hashPin(str(b.pin, 20)), c.u.id);
+  run('UPDATE users SET pin_hash = ? WHERE id = ?', await hashPin(str(b.pin, 20)), c.u.id);
   return { ok: true };
 });
 

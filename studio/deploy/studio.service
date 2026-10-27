@@ -1,0 +1,17 @@
+[Unit]
+Description=Studio app (shoots, photos, social)
+After=network.target
+
+[Service]
+User=studio
+WorkingDirectory=/opt/studio
+EnvironmentFile=/etc/studio.env
+ExecStart=/usr/bin/node /opt/studio/server.js
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/studio
+
+[Install]
+WantedBy=multi-user.target
